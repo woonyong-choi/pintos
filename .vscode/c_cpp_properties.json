@@ -1,18 +1,24 @@
 {
     "configurations": [
         {
-            "name": "Pintos-Debug",
+
+            "name": "PintOS (DevContainer)",
             "includePath": [
-                "${workspaceFolder}/**"
+                "${workspaceFolder}/pintos",
+                "${workspaceFolder}/pintos/include/**",
+                "${workspaceFolder}/pintos/lib/**"
             ],
             "defines": [
                 "USERPROG",
-                "THREADS"
+                "VM",
+                "FILESYS"
             ],
             "compilerPath": "/usr/bin/gcc",
-            "cStandard": "c11",
+            "cStandard": "gnu17",
+
             "intelliSenseMode": "linux-gcc-x64"
         }
     ],
     "version": 4
 }
+
