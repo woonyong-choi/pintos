@@ -238,11 +238,13 @@ write (int fd, const void *buffer, unsigned size, struct intr_frame *f) {
 		}
 		lock_release (&filesys_lock);
 
-		if (bytes_written <= 0) {
+		if (bytes_written < 0) {
 			if (written == 0)
 				written = (unsigned) -1;
 			break;
 		}
+		if (bytes_written == 0)
+    break;
 
 		written += bytes_written;
 		if ((size_t) bytes_written < chunk)
@@ -547,18 +549,26 @@ copy_out (void *dst, const void *src, size_t size, struct intr_frame *f) {
 
 static char *
 copy_in_string (const char *str, struct intr_frame *f) {
-	char *kernel = palloc_get_page (0);
-	uintptr_t user = (uintptr_t) str;
+    size_t len = 0;
+    char *kernel;
 
-	if (kernel == NULL)
-		exit (-1);
+    for (; len < PGSIZE; len++) {
+        const char *uaddr = str + len;
 
-	for (size_t i = 0; i < PGSIZE; i++) {
-		copy_in (&kernel[i], (const void *) (user + i), 1, f);
-		if (kernel[i] == '\0')
-			return kernel;
-	}
+        if (!try_claim_user_addr (uaddr, false, f))
+            exit (-1);
 
-	palloc_free_page (kernel);
-	exit (-1);
+        if (*uaddr == '\0')
+            break;
+    }
+
+    if (len == PGSIZE)
+        exit (-1);
+
+    kernel = palloc_get_page (0);
+    if (kernel == NULL)
+        exit (-1);
+
+    memcpy (kernel, str, len + 1);
+    return kernel;
 }

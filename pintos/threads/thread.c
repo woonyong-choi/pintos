@@ -359,7 +359,7 @@ thread_set_root (struct thread *t) {
 #ifdef USERPROG
 	root_thread = t;
 #else
-	UNUSED (t);
+	(void) t;
 #endif
 }
 
