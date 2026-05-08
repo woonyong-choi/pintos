@@ -402,8 +402,14 @@ process_exec (void *f_name) {
 	/*
 	 * 먼저 현재 문맥을 제거한다.
 	 */
+#ifdef VM
+	process_cleanup ();
+	close_running_file (curr);
+	supplemental_page_table_init (&curr->spt);
+#else
 	close_running_file (curr);
 	process_cleanup ();
+#endif
 
 	/*
 	 * 그리고 바이너리를 로드한다.
@@ -573,11 +579,19 @@ process_exit (void) {
 		return;
 
 	root = thread_root ();
+#ifdef VM
+	process_cleanup ();
+	close_running_file (curr);
+	close_open_files (curr);
+#else
 	close_running_file (curr); // 추가 
 	close_open_files (curr);
+#endif
 	reparent_or_reap_children (curr, root);
 	finish_self_status (curr);
+#ifndef VM
 	process_cleanup ();
+#endif
 }
 
 int
@@ -1277,6 +1291,32 @@ validate_segment (const struct Phdr *phdr, struct file *file) {
  * 여기부터의 코드는 project 3 이후에 사용된다.
  * project 2만을 위한 함수를 구현하려면 위쪽 블록에 구현하라.
  */
+
+/* VM 빌드에서도 ELF 세그먼트 검증은 동일하게 필요하다. */
+static bool
+validate_segment (const struct Phdr *phdr, struct file *file) {
+	if ((phdr->p_offset & PGMASK) != (phdr->p_vaddr & PGMASK))
+		return false;
+
+	if (phdr->p_offset > (uint64_t) file_length (file))
+		return false;
+
+	if (phdr->p_memsz < phdr->p_filesz)
+		return false;
+
+	if (!is_user_vaddr ((void *) phdr->p_vaddr))
+		return false;
+	if (!is_user_vaddr ((void *) (phdr->p_vaddr + phdr->p_memsz)))
+		return false;
+
+	if (phdr->p_vaddr + phdr->p_memsz < phdr->p_vaddr)
+		return false;
+
+	if (phdr->p_vaddr < PGSIZE)
+		return false;
+
+	return true;
+}
 
 static bool
 lazy_load_segment (struct page *page, void *aux) {
