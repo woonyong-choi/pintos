@@ -152,7 +152,8 @@ halt (void) {
 tid_t
 
 fork (const char *thread_name, struct intr_frame *if_) {
-	check_address (thread_name);
+	check_user_string (thread_name);
+	// check_address (thread_name); 수정 
 	return process_fork (thread_name, if_);
 }
 
@@ -223,7 +224,8 @@ bool
 create (const char *file, unsigned initial_size) {
 	bool result;
 
-	check_address ((void *) file);
+	check_user_string (file);
+	// check_address ((void *) file); hosoek 수정
 	lock_acquire (&filesys_lock);
 	result = filesys_create (file, initial_size);
 	lock_release (&filesys_lock);
@@ -235,7 +237,8 @@ open (const char *file) {
 	struct file *opened_file;
 	int fd;
 
-	check_address ((void *) file);
+	check_user_string (file);
+	// check_address ((void *) file); hoseok 수정
 	lock_acquire (&filesys_lock);
 
 	// 열린 파일 객체의 주소
@@ -304,7 +307,15 @@ filesize (int fd) {
 
 bool
 remove (const char *file) {
-	return filesys_remove (file);
+	bool result; 
+	
+	/* 검증하는 방식으로 수정*/
+	check_user_string (file);
+	lock_acquire (&filesys_lock);
+	result = filesys_remove (file);
+	lock_release (&filesys_lock);
+	
+	return result;
 }
 
 void
