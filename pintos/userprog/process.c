@@ -33,6 +33,7 @@ static bool duplicate_fd_table (struct thread *curr, struct thread *parent);
 static void close_open_files (struct thread *curr);
 static void reparent_or_reap_children (struct thread *curr, struct thread *root);
 static void finish_self_status (struct thread *curr);
+static void close_running_file (struct thread *curr);
 
 struct fork_args {
 	struct thread *parent;   // fork를 호출한 부모 스레드
@@ -401,6 +402,7 @@ process_exec (void *f_name) {
 	/*
 	 * 먼저 현재 문맥을 제거한다.
 	 */
+	close_running_file (curr);
 	process_cleanup ();
 
 	/*
@@ -549,6 +551,19 @@ process_exit_with_status (int status) {
 }
 /* HOSEOK'S CODE */
 
+/* 프로세스가 보관하던 executable file을 닫아 실행 파일 write deny를 해제한다. */
+/* HOSEOK'S CODE */
+static void
+close_running_file (struct thread *curr) {
+	if (curr == NULL || curr->running_file == NULL)
+		return;
+
+	file_allow_write (curr->running_file);
+	file_close (curr->running_file);
+	curr->running_file = NULL;
+}
+/* HOSEOK'S CODE */
+
 void
 process_exit (void) {
 	struct thread *curr = thread_current ();
@@ -558,6 +573,7 @@ process_exit (void) {
 		return;
 
 	root = thread_root ();
+	close_running_file (curr); // 추가 
 	close_open_files (curr);
 	reparent_or_reap_children (curr, root);
 	finish_self_status (curr);
@@ -852,6 +868,8 @@ load (const char *file_name, struct intr_frame *if_) {
 		goto done;
 	}
 
+	file_deny_write (file);
+
 	/*
 	 * 실행 파일 헤더를 읽고 검증한다.
 	 */
@@ -1086,6 +1104,12 @@ done:
 	 */
 	if (fn_copy != NULL)
 		palloc_free_page (fn_copy);
+
+	if (success && file != NULL) {
+		t->running_file = file;
+		file = NULL;
+	}
+
 
 	if (file != NULL)
 		file_close (file);

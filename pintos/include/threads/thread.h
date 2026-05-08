@@ -10,7 +10,10 @@
 #ifdef VM
 #include "vm/vm.h"
 #endif
-
+/* struct thread는 실행 파일을 포인터로만 보관하므로 전체 정의 대신 전방 선언만 둔다. */
+#ifdef USERPROG
+struct file;
+#endif
 /*
  * 스레드 생애 주기의 상태들.
  */
@@ -139,6 +142,8 @@ struct thread {
 	int next_fd;                      // 다음에 할당할 fd 번호
 	struct list child_status_list;    // 부모가 소유하는 자식 상태 레코드 목록
 	struct child_status *self_status; // 현재 스레드 자신의 child_status
+	struct file *running_file;        // 현재 실행 중인 파일, rox 보호용 
+	
 #endif
 #ifdef VM
 	/*
