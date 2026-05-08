@@ -176,6 +176,7 @@ exec (const char *cmd_line) {
 
 void
 exit (int status) {
+	/*
 	struct thread *curr = thread_current ();
 
 	if (curr == NULL)
@@ -185,6 +186,9 @@ exit (int status) {
 	if (curr->self_status != NULL)
 		curr->self_status->exit_status = status;
 	thread_exit ();
+	*/
+	process_exit_with_status (status);
+
 }
 
 int

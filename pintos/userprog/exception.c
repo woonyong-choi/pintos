@@ -5,6 +5,8 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "intrinsic.h"
+#include "userprog/process.h"
+
 
 /*
  * 처리된 페이지 폴트의 개수.
@@ -182,10 +184,15 @@ page_fault (struct intr_frame *f) {
 		return;
 #endif
 
+
 	/*
 	 * 페이지 폴트 수를 센다.
 	 */
 	page_fault_cnt++;
+
+		/* 유저가 인자값으로 NULL을 보낼때 커널이 죽는 커널 패닉이(case SEL_KCSEG) 아닌 유저 프로세스를 종료시켜야함(exit -1) */
+	if (f->cs == SEL_UCSEG)
+	process_exit_with_status (-1);
 
 	/*
 	 * 실제 fault라면 정보를 출력하고 종료한다.

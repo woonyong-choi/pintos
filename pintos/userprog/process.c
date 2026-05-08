@@ -531,6 +531,24 @@ finish_self_status (struct thread *curr) {
  * 프로세스를 종료한다. 이 함수는 thread_exit()에 의해 호출된다.
  */
 
+/* 현재 스레드가 0 이거나 page falut 났을때 -1 출력하는 함수 */
+/* HOSEOK'S CODE */
+void
+process_exit_with_status (int status) {
+	struct thread *curr = thread_current ();
+
+	if (curr == NULL)
+		thread_exit ();
+
+	printf ("%s: exit(%d)\n", curr->name, status);
+
+	if (curr->self_status != NULL)
+		curr->self_status->exit_status = status;
+
+	thread_exit ();
+}
+/* HOSEOK'S CODE */
+
 void
 process_exit (void) {
 	struct thread *curr = thread_current ();
