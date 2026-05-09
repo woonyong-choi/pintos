@@ -19,6 +19,9 @@
 #include "filesys/file.h"
 #include "devices/input.h"
 #include "lib/string.h"
+#ifdef VM
+#include "vm/vm.h"
+#endif
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -27,20 +30,31 @@ void syscall_handler (struct intr_frame *);
 void halt (void);
 void exit (int status);
 tid_t fork (const char *thread_name, struct intr_frame *f);
-int exec (const char *cmd_line);
-int write (int fd, const void *buffer, unsigned size);
-int read (int fd, void *buffer, unsigned size);
-bool create (const char *file, unsigned initial_size);
-int open (const char *file);
+int exec (const char *cmd_line, struct intr_frame *f);
+int write (int fd, const void *buffer, unsigned size, struct intr_frame *f);
+int read (int fd, void *buffer, unsigned size, struct intr_frame *f);
+bool create (const char *file, unsigned initial_size, struct intr_frame *f);
+int open (const char *file, struct intr_frame *f);
 void close (int fd);
-int read (int fd, void *buffer, unsigned size);
-bool remove (const char *file);
+bool remove (const char *file, struct intr_frame *f);
 void seek (int fd, unsigned position);
 unsigned tell (int fd);
 int filesize (int fd);
 void check_address (const void *addr);
-static void check_user_buffer (const void *buffer, unsigned size);
-static void check_user_string (const char *str);
+static bool user_page_present (struct thread *curr, const void *addr);
+static bool user_page_accessible (struct thread *curr, const void *addr,
+                                  bool write);
+static bool try_claim_user_addr (const void *addr, bool write,
+                                 struct intr_frame *f);
+static void validate_user_addr (const void *addr, bool write,
+                                struct intr_frame *f);
+static void validate_user_buffer (const void *buffer, unsigned size,
+                                  bool write, struct intr_frame *f);
+static void copy_in (void *dst, const void *src, size_t size,
+                     struct intr_frame *f);
+static void copy_out (void *dst, const void *src, size_t size,
+                      struct intr_frame *f);
+static char *copy_in_string (const char *str, struct intr_frame *f);
 
 /* 추가 변수들 */
 struct lock filesys_lock;
@@ -103,24 +117,24 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		f->R.rax = process_wait ((tid_t) f->R.rdi);
 		break;
 	case SYS_EXEC:
-		f->R.rax = exec ((const char *) f->R.rdi);
+		f->R.rax = exec ((const char *) f->R.rdi, f);
 		break;
 	case SYS_READ:
-		f->R.rax = read (f->R.rdi, (void *) f->R.rsi, f->R.rdx);
+		f->R.rax = read (f->R.rdi, (void *) f->R.rsi, f->R.rdx, f);
 		break;
 	case SYS_WRITE:
 		/* fd, buffer, size를 전달받는다. */
-		f->R.rax = write (f->R.rdi, (const void *) f->R.rsi, f->R.rdx);
+		f->R.rax = write (f->R.rdi, (const void *) f->R.rsi, f->R.rdx, f);
 		break;
 	case SYS_EXIT:
 		/* 종료 상태값 받음 */
 		exit (f->R.rdi);
 		break;
 	case SYS_CREATE:
-		f->R.rax = create ((const char *) f->R.rdi, f->R.rsi);
+		f->R.rax = create ((const char *) f->R.rdi, f->R.rsi, f);
 		break;
 	case SYS_OPEN:
-		f->R.rax = open ((const char *) f->R.rdi);
+		f->R.rax = open ((const char *) f->R.rdi, f);
 		break;
 	case SYS_CLOSE:
 		close (f->R.rdi);
@@ -129,7 +143,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		f->R.rax = filesize (f->R.rdi);
 		break;
 	case SYS_REMOVE:
-		f->R.rax = remove ((const char *) f->R.rdi);
+		f->R.rax = remove ((const char *) f->R.rdi, f);
 		break;
 	case SYS_SEEK:
 		seek (f->R.rdi, f->R.rsi);
@@ -150,24 +164,20 @@ halt (void) {
 }
 
 tid_t
-
 fork (const char *thread_name, struct intr_frame *if_) {
-	check_address (thread_name);
-	return process_fork (thread_name, if_);
+	char *name_copy = copy_in_string (thread_name, if_);
+	tid_t tid = process_fork (name_copy, if_);
+
+	palloc_free_page (name_copy);
+	return tid;
 }
 
 int
-exec (const char *cmd_line) {
+exec (const char *cmd_line, struct intr_frame *f) {
 	char *cmd_copy;
 	int status;
 
-	check_user_string (cmd_line);
-
-	cmd_copy = palloc_get_page (0);
-	if (cmd_copy == NULL)
-		exit (-1);
-
-	strlcpy (cmd_copy, cmd_line, PGSIZE);
+	cmd_copy = copy_in_string (cmd_line, f);
 	status = process_exec (cmd_copy);
 	if (status < 0)
 		exit (-1);
@@ -176,69 +186,90 @@ exec (const char *cmd_line) {
 
 void
 exit (int status) {
-	struct thread *curr = thread_current ();
-
-	if (curr == NULL)
-		thread_exit ();
-
-	printf ("%s: exit(%d)\n", curr->name, status);
-	if (curr->self_status != NULL)
-		curr->self_status->exit_status = status;
-	thread_exit ();
+	process_exit_with_status (status);
 }
 
 int
-write (int fd, const void *buffer, unsigned size) {
-	int write_result;
-	struct file *file;
+write (int fd, const void *buffer, unsigned size, struct intr_frame *f) {
+	uint8_t *kpage;
+	unsigned written = 0;
 
-	/* 유효성 검사 로직 */
-	check_user_buffer (buffer, size);
+	if (size == 0)
+		return 0;
 
-	/* 락 획득: 동시에 읽어서 꼬임 방지*/
-	lock_acquire (&filesys_lock);
+	if (fd == 0)
+		return -1;
 
-	/* 명령: 화면에 출력하라 */
-	if (fd == 1) {
-		putbuf (buffer, size);
-		write_result = size;
+	validate_user_buffer (buffer, size, false, f);
+
+	kpage = palloc_get_page (0);
+	if (kpage == NULL)
+		return -1;
+
+	while (written < size) {
+		size_t chunk = size - written;
+		int bytes_written;
+
+		if (chunk > PGSIZE)
+			chunk = PGSIZE;
+
+		copy_in (kpage, (const uint8_t *) buffer + written, chunk, f);
+
+		lock_acquire (&filesys_lock);
+		if (fd == 1) {
+			putbuf ((const char *) kpage, chunk);
+			bytes_written = chunk;
+		} else {
+			struct file *file = process_get_file (fd);
+			bytes_written = file == NULL ? -1 : file_write (file, kpage, chunk);
+		}
+		lock_release (&filesys_lock);
+
+		if (bytes_written < 0) {
+			if (written == 0)
+				written = (unsigned) -1;
+			break;
+		}
+		if (bytes_written == 0)
+			break;
+
+		written += bytes_written;
+		if ((size_t) bytes_written < chunk)
+			break;
 	}
-	/* 명령: 기타... */
-	else {
-		file = process_get_file (fd);
-		write_result = file == NULL ? -1 : file_write (file, buffer, size);
-	}
 
-	/* 락 해제: 이제 읽을 필요 없음 */
-	lock_release (&filesys_lock);
-
-	return write_result;
+	palloc_free_page (kpage);
+	return (int) written;
 }
 
 bool
-create (const char *file, unsigned initial_size) {
+create (const char *file, unsigned initial_size, struct intr_frame *f) {
+	char *file_copy;
 	bool result;
 
-	check_address ((void *) file);
+	file_copy = copy_in_string (file, f);
 	lock_acquire (&filesys_lock);
-	result = filesys_create (file, initial_size);
+	result = filesys_create (file_copy, initial_size);
 	lock_release (&filesys_lock);
+	palloc_free_page (file_copy);
 	return result;
 }
 
 int
-open (const char *file) {
+open (const char *file, struct intr_frame *f) {
+	char *file_copy;
 	struct file *opened_file;
 	int fd;
 
-	check_address ((void *) file);
+	file_copy = copy_in_string (file, f);
 	lock_acquire (&filesys_lock);
 
 	// 열린 파일 객체의 주소
-	opened_file = filesys_open (file);
+	opened_file = filesys_open (file_copy);
 
 	if (opened_file == NULL) {
 		lock_release (&filesys_lock);
+		palloc_free_page (file_copy);
 		return -1;
 	}
 
@@ -247,121 +278,290 @@ open (const char *file) {
 	if (fd == -1)
 		file_close (opened_file);
 	lock_release (&filesys_lock);
+	palloc_free_page (file_copy);
 	return fd;
 }
 
 void
 close (int fd) {
-	lock_acquire (&filesys_lock);
 	process_close_file (fd);
-	lock_release (&filesys_lock);
 }
 
 int
-read (int fd, void *buffer, unsigned size) {
-	int type_size = 0;
-	uint8_t *buf = (uint8_t *) buffer;
+read (int fd, void *buffer, unsigned size, struct intr_frame *f) {
+	uint8_t *kpage;
+	unsigned read_bytes = 0;
 
-	check_address (buffer);
+	if (size == 0)
+		return 0;
 
-	lock_acquire (&filesys_lock);
-	struct file *f = process_get_file (fd);
-	if (f == NULL) {
-		lock_release (&filesys_lock);
+	if (fd == 1)
 		return -1;
-	}
 
-	if (fd == 0) {
-		while (type_size < size) {
-			buf[type_size] = input_getc ();
+	validate_user_buffer (buffer, size, true, f);
 
-			if (buf[type_size] == '\n') {
-				break;
-			}
-			type_size++;
+	kpage = palloc_get_page (0);
+	if (kpage == NULL)
+		return -1;
+
+	while (read_bytes < size) {
+		size_t chunk = size - read_bytes;
+		int bytes_read = 0;
+
+		if (chunk > PGSIZE)
+			chunk = PGSIZE;
+
+		if (fd == 0) {
+			while ((size_t) bytes_read < chunk)
+				kpage[bytes_read++] = input_getc ();
+		} else {
+			struct file *file;
+
+			lock_acquire (&filesys_lock);
+			file = process_get_file (fd);
+			bytes_read = file == NULL ? -1 : file_read (file, kpage, chunk);
+			lock_release (&filesys_lock);
 		}
 
-		lock_release (&filesys_lock);
-		return type_size;
+		if (bytes_read <= 0) {
+			if (bytes_read < 0 && read_bytes == 0)
+				read_bytes = (unsigned) -1;
+			break;
+		}
+
+		copy_out ((uint8_t *) buffer + read_bytes, kpage, bytes_read, f);
+		read_bytes += bytes_read;
+		if ((size_t) bytes_read < chunk)
+			break;
 	}
 
-	else {
-		off_t s = file_read (f, buffer, size);
-		lock_release (&filesys_lock);
-		return s;
-	}
+	palloc_free_page (kpage);
+	return (int) read_bytes;
 }
 
 int
 filesize (int fd) {
-	struct file *f = process_get_file (fd);
-	return file_length (f);
+	struct file *f;
+	int length = -1;
+
+	lock_acquire (&filesys_lock);
+	f = process_get_file (fd);
+	if (f != NULL)
+		length = file_length (f);
+	lock_release (&filesys_lock);
+	return length;
 }
 
 bool
-remove (const char *file) {
-	return filesys_remove (file);
+remove (const char *file, struct intr_frame *f) {
+	char *file_copy;
+	bool result;
+
+	file_copy = copy_in_string (file, f);
+	lock_acquire (&filesys_lock);
+	result = filesys_remove (file_copy);
+	lock_release (&filesys_lock);
+	palloc_free_page (file_copy);
+
+	return result;
 }
 
 void
 seek (int fd, unsigned position) {
-	struct file *f = process_get_file (fd);
-	file_seek (f, position);
+	struct file *f;
+
+	lock_acquire (&filesys_lock);
+	f = process_get_file (fd);
+	if (f != NULL)
+		file_seek (f, position);
+	lock_release (&filesys_lock);
 }
 unsigned
 tell (int fd) {
-	struct file *f = process_get_file (fd);
-	return file_tell (f);
+	struct file *f;
+	unsigned position = 0;
+
+	lock_acquire (&filesys_lock);
+	f = process_get_file (fd);
+	if (f != NULL)
+		position = file_tell (f);
+	lock_release (&filesys_lock);
+	return position;
 }
 /* 여기서부턴 헬퍼 함수 기술 */
-/* 유효성 검사 */
-void
-check_address (const void *addr) {
-	struct thread *curr = thread_current ();
-	/* 애초에 없다면? */
-	if (addr == NULL) {
-		exit (-1);
-	}
+static bool
+user_page_present (struct thread *curr, const void *addr) {
+	uint64_t *pte;
 
 	if (curr == NULL || curr->pml4 == NULL)
-		exit (-1);
+		return false;
 
-	/* 커널 영역 침범 여부 */
-	if (!is_user_vaddr (addr)) {
-		exit (-1);
+	pte = pml4e_walk (curr->pml4, (uint64_t) addr, 0);
+	if (pte == NULL || (*pte & PTE_P) == 0)
+		return false;
+
+	return true;
+}
+
+static bool
+user_page_accessible (struct thread *curr, const void *addr, bool write) {
+	uint64_t *pte;
+
+	if (!user_page_present (curr, addr))
+		return false;
+
+	pte = pml4e_walk (curr->pml4, (uint64_t) addr, 0);
+	return !write || is_writable (pte);
+}
+
+static bool
+try_claim_user_addr (const void *addr, bool write, struct intr_frame *f) {
+	struct thread *curr = thread_current ();
+
+#ifndef VM
+	(void) f;
+#endif
+
+	if (addr == NULL || curr == NULL || curr->pml4 == NULL)
+		return false;
+
+	if (!is_user_vaddr (addr))
+		return false;
+
+	if (user_page_accessible (curr, addr, write))
+		return true;
+
+	if (write && user_page_present (curr, addr))
+		return false;
+
+#ifdef VM
+	void *upage = pg_round_down (addr);
+	struct page *page = spt_find_page (&curr->spt, upage);
+
+	if (page != NULL) {
+		if (!vm_claim_page (upage))
+			return false;
+		return user_page_accessible (curr, addr, write);
 	}
 
-	/* 현재 프로세스의 페이지 테이블에서 addr가 실제 물리 메모리에 매핑되어 있는지 확인하고,
-	없으면 프로세스를 종료한다. */
-	if (pml4_get_page (curr->pml4, addr) == NULL) {
-		exit (-1);
+	if (f != NULL) {
+		uintptr_t uaddr = (uintptr_t) addr;
+		uintptr_t rsp = f->rsp;
+
+		if (uaddr < (uintptr_t) USER_STACK && rsp >= 8 && uaddr >= rsp - 8) {
+			if (!vm_try_handle_fault (f, (void *) addr, true, write, true))
+				return false;
+			return user_page_accessible (curr, addr, write);
+		}
 	}
+#endif
+
+	return false;
 }
 
 static void
-check_user_buffer (const void *buffer, unsigned size) {
-	const char *addr = buffer;
+validate_user_addr (const void *addr, bool write, struct intr_frame *f) {
+	if (!try_claim_user_addr (addr, write, f))
+		exit (-1);
+}
+
+void
+check_address (const void *addr) {
+	validate_user_addr (addr, false, NULL);
+}
+
+static void
+validate_user_buffer (const void *buffer, unsigned size, bool write,
+                      struct intr_frame *f) {
+	const uint8_t *addr;
+	const uint8_t *end;
 	uintptr_t start;
-	uintptr_t end;
+	uintptr_t last;
 
 	if (size == 0)
 		return;
 
-	check_address (buffer);
-	check_address (addr + size - 1);
+	start = (uintptr_t) buffer;
+	last = start + size - 1;
+	if (buffer == NULL || last < start)
+		exit (-1);
 
-	start = (uintptr_t) pg_round_down (addr);
-	end = (uintptr_t) pg_round_down (addr + size - 1);
-	for (; start <= end; start += PGSIZE)
-		check_address ((const void *) start);
+	addr = buffer;
+	end = (const uint8_t *) buffer + size;
+	while (addr < end) {
+		uintptr_t next_page;
+
+		validate_user_addr (addr, write, f);
+
+		next_page = (uintptr_t) pg_round_down (addr) + PGSIZE;
+		if (next_page <= (uintptr_t) addr)
+			break;
+		addr = (const uint8_t *) next_page;
+	}
 }
 
 static void
-check_user_string (const char *str) {
-	while (true) {
-		check_address (str);
-		if (*str == '\0')
-			return;
-		str++;
+copy_in (void *dst, const void *src, size_t size, struct intr_frame *f) {
+	uint8_t *kernel = dst;
+	const uint8_t *user = src;
+
+	while (size > 0) {
+		size_t chunk;
+
+		validate_user_addr (user, false, f);
+		chunk = PGSIZE - pg_ofs (user);
+		if (chunk > size)
+			chunk = size;
+
+		memcpy (kernel, user, chunk);
+		kernel += chunk;
+		user += chunk;
+		size -= chunk;
 	}
+}
+
+static void
+copy_out (void *dst, const void *src, size_t size, struct intr_frame *f) {
+	uint8_t *user = dst;
+	const uint8_t *kernel = src;
+
+	while (size > 0) {
+		size_t chunk;
+
+		validate_user_addr (user, true, f);
+		chunk = PGSIZE - pg_ofs (user);
+		if (chunk > size)
+			chunk = size;
+
+		memcpy (user, kernel, chunk);
+		user += chunk;
+		kernel += chunk;
+		size -= chunk;
+	}
+}
+
+static char *
+copy_in_string (const char *str, struct intr_frame *f) {
+	size_t len = 0;
+	char *kernel;
+
+	for (; len < PGSIZE; len++) {
+		const char *uaddr = str + len;
+
+		if (!try_claim_user_addr (uaddr, false, f))
+			exit (-1);
+
+		if (*uaddr == '\0')
+			break;
+	}
+
+	if (len == PGSIZE)
+		exit (-1);
+
+	kernel = palloc_get_page (0);
+	if (kernel == NULL)
+		exit (-1);
+
+	memcpy (kernel, str, len + 1);
+	return kernel;
 }

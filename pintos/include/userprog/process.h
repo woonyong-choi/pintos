@@ -9,6 +9,8 @@ int process_exec (void *f_name);
 int process_wait (tid_t);
 void process_exit (void);
 void process_activate (struct thread *next);
+void process_exit_with_status (int status);
+
 
 /* 파일 디스크립터 헬퍼 */
 int process_add_file (struct file *f);

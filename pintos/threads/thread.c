@@ -359,7 +359,7 @@ thread_set_root (struct thread *t) {
 #ifdef USERPROG
 	root_thread = t;
 #else
-	UNUSED (t);
+	(void) t;
 #endif
 }
 
@@ -543,6 +543,7 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->waiting_lock = NULL;
 
 #ifdef USERPROG
+	t->running_file = NULL;                // 실행 중인 파일은 load 성공 시 보관
 	t->fd_table = NULL;                    // fd 테이블은 프로세스 로드 시점에 할당
 	t->next_fd = 2;                        // 0, 1은 stdin/stdout 예약
 	list_init (&t->child_status_list);     // 자식 상태 레코드 리스트 초기화

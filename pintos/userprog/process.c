@@ -7,6 +7,7 @@
 #include <string.h>
 #include "lib/cstr.h"
 #include "userprog/gdt.h"
+#include "userprog/syscall.h"
 #include "userprog/tss.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
@@ -30,9 +31,16 @@ static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
 static bool duplicate_fd_table (struct thread *curr, struct thread *parent);
+static bool duplicate_running_file (struct thread *curr, struct thread *parent);
 static void close_open_files (struct thread *curr);
-static void reparent_or_reap_children (struct thread *curr, struct thread *root);
+static void reparent_or_reap_children (struct thread *curr);
 static void finish_self_status (struct thread *curr);
+static void close_running_file (struct thread *curr);
+static void process_close_file_unlocked (int fd);
+static void ensure_orphan_status_list (void);
+
+static struct list orphan_status_list;
+static bool orphan_status_list_initialized;
 
 struct fork_args {
 	struct thread *parent;   // fork를 호출한 부모 스레드
@@ -68,6 +76,8 @@ process_create_initd (const char *file_name) {
 
 	if (curr == NULL)
 		return TID_ERROR;
+
+	ensure_orphan_status_list ();
 
 	/*
 	 * 커널 풀에서 페이지 메모리 할당, 0 = 커널 영역(유저 옵션 없음)
@@ -274,29 +284,49 @@ duplicate_fd_table (struct thread *curr, struct thread *parent) {
 		return true;
 	}
 
+	lock_acquire (&filesys_lock);
 	for (fd = 2; fd < parent->next_fd && fd < FD_MAX; fd++) {
 		if (parent->fd_table[fd] == NULL)
 			continue;
 
 		curr->fd_table[fd] = file_duplicate (parent->fd_table[fd]);
-		if (curr->fd_table[fd] == NULL)
+		if (curr->fd_table[fd] == NULL) {
+			lock_release (&filesys_lock);
 			goto error;
+		}
 	}
+	lock_release (&filesys_lock);
 
 	curr->next_fd = parent->next_fd;
 	return true;
 
 error:
+	lock_acquire (&filesys_lock);
 	for (fd = 2; fd < FD_MAX; fd++) {
 		if (curr->fd_table[fd] == NULL)
 			continue;
 		file_close (curr->fd_table[fd]);
 		curr->fd_table[fd] = NULL;
 	}
+	lock_release (&filesys_lock);
 	palloc_free_page (curr->fd_table);
 	curr->fd_table = NULL;
 	curr->next_fd = 2;
 	return false;
+}
+
+static bool
+duplicate_running_file (struct thread *curr, struct thread *parent) {
+	if (curr == NULL || parent == NULL)
+		return false;
+
+	if (parent->running_file == NULL)
+		return true;
+
+	lock_acquire (&filesys_lock);
+	curr->running_file = file_duplicate (parent->running_file);
+	lock_release (&filesys_lock);
+	return curr->running_file != NULL;
 }
 
 /*
@@ -309,7 +339,7 @@ error:
  * 핵심 순서:
  *   1. 부모의 인터럽트 프레임(레지스터) 복사
  *   2. 부모의 페이지 테이블 복제 (duplicate_pte)
- *   3. 부모의 fd_table 복제 (file_duplicate)
+ *   3. 부모의 fd_table과 running_file 복제
  *   4. 자식의 fork 반환값을 0으로 설정
  *   5. 부모에게 "복제 완료" 알림, do_iret으로 유저 모드 진입 */
 
@@ -348,6 +378,9 @@ __do_fork (void *aux) {
 #endif
 
 	if (!duplicate_fd_table (curr, parent))
+		goto error;
+
+	if (!duplicate_running_file (curr, parent))
 		goto error;
 
 	/* 자식 프로세스에서 fork()의 반환값은 0이다. */
@@ -401,7 +434,14 @@ process_exec (void *f_name) {
 	/*
 	 * 먼저 현재 문맥을 제거한다.
 	 */
+#ifdef VM
 	process_cleanup ();
+	close_running_file (curr);
+	supplemental_page_table_init (&curr->spt);
+#else
+	close_running_file (curr);
+	process_cleanup ();
+#endif
 
 	/*
 	 * 그리고 바이너리를 로드한다.
@@ -484,11 +524,21 @@ close_open_files (struct thread *curr) {
 }
 
 static void
-reparent_or_reap_children (struct thread *curr, struct thread *root) {
+ensure_orphan_status_list (void) {
+	if (!orphan_status_list_initialized) {
+		list_init (&orphan_status_list);
+		orphan_status_list_initialized = true;
+	}
+}
+
+static void
+reparent_or_reap_children (struct thread *curr) {
 	struct list_elem *e;
 
-	if (curr == NULL || root == NULL || root == curr)
+	if (curr == NULL)
 		return;
+
+	ensure_orphan_status_list ();
 
 	e = list_begin (&curr->child_status_list);
 	while (e != list_end (&curr->child_status_list)) {
@@ -503,7 +553,7 @@ reparent_or_reap_children (struct thread *curr, struct thread *root) {
 
 		cs->orphaned = true;
 		list_remove (&cs->elem);
-		list_push_back (&root->child_status_list, &cs->elem);
+		list_push_back (&orphan_status_list, &cs->elem);
 	}
 }
 
@@ -532,18 +582,55 @@ finish_self_status (struct thread *curr) {
  */
 
 void
+process_exit_with_status (int status) {
+	struct thread *curr = thread_current ();
+
+	if (curr == NULL)
+		thread_exit ();
+
+	printf ("%s: exit(%d)\n", curr->name, status);
+
+	if (curr->self_status != NULL)
+		curr->self_status->exit_status = status;
+
+	thread_exit ();
+}
+
+/* 프로세스가 보관하던 executable file을 닫아 실행 파일 write deny를 해제한다. */
+static void
+close_running_file (struct thread *curr) {
+	if (curr == NULL || curr->running_file == NULL)
+		return;
+
+	lock_acquire (&filesys_lock);
+	file_allow_write (curr->running_file);
+	file_close (curr->running_file);
+	lock_release (&filesys_lock);
+	curr->running_file = NULL;
+}
+
+void
 process_exit (void) {
 	struct thread *curr = thread_current ();
-	struct thread *root;
 
 	if (curr == NULL)
 		return;
 
-	root = thread_root ();
-	close_open_files (curr);
-	reparent_or_reap_children (curr, root);
-	finish_self_status (curr);
+#ifdef VM
 	process_cleanup ();
+	close_running_file (curr);
+	close_open_files (curr);
+#else
+	close_running_file (curr);
+	close_open_files (curr);
+#endif
+	reparent_or_reap_children (curr);
+	finish_self_status (curr);
+	if (thread_root () == curr)
+		thread_set_root (NULL);
+#ifndef VM
+	process_cleanup ();
+#endif
 }
 
 int
@@ -582,6 +669,13 @@ process_get_file (int fd) {
 
 void
 process_close_file (int fd) {
+	lock_acquire (&filesys_lock);
+	process_close_file_unlocked (fd);
+	lock_release (&filesys_lock);
+}
+
+static void
+process_close_file_unlocked (int fd) {
 	struct thread *curr = thread_current ();
 
 	if (curr == NULL || fd < 2 || fd >= FD_MAX || curr->fd_table == NULL)
@@ -780,7 +874,10 @@ validate_segment (const struct Phdr *phdr, struct file *file) {
 		return false;
 
 	/* p_offset은 파일 내부에 있어야 한다. */
-	if (phdr->p_offset > (uint64_t) file_length (file))
+	lock_acquire (&filesys_lock);
+	off_t length = file_length (file);
+	lock_release (&filesys_lock);
+	if (phdr->p_offset > (uint64_t) length)
 		return false;
 
 	/* p_memsz는 p_filesz보다 크거나 같아야 한다. */
@@ -860,7 +957,12 @@ load (const char *file_name, struct intr_frame *if_) {
 	/*
 	 * 실행 파일을 연다.
 	 */
+	lock_acquire (&filesys_lock);
 	file = filesys_open (argv[0]);
+	if (file != NULL)
+		file_deny_write (file);
+	lock_release (&filesys_lock);
+
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
@@ -882,7 +984,11 @@ load (const char *file_name, struct intr_frame *if_) {
 	 * e_phentsize: 프로그램 헤더 1개의 크기
 	 * e_phnum    : 프로그램 헤더 개수, 너무 크면 비정상 파일로 간주
 	 */
-	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr ||
+	lock_acquire (&filesys_lock);
+	bool ehdr_read_success = file_read (file, &ehdr, sizeof ehdr) == sizeof ehdr;
+	lock_release (&filesys_lock);
+
+	if (!ehdr_read_success ||
 	    memcmp (ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 ||
 	    ehdr.e_machine != 0x3E || ehdr.e_version != 1 ||
 	    ehdr.e_phentsize != sizeof (struct Phdr) || ehdr.e_phnum > 1024) {
@@ -908,14 +1014,22 @@ load (const char *file_name, struct intr_frame *if_) {
 		 * file_ofs 범위 검사
 		 * file_seek 이후의 file_read는 file_ofs 위치부터 읽는다.
 		 */
-		if (file_ofs < 0 || file_ofs > file_length (file))
+		lock_acquire (&filesys_lock);
+		off_t length = file_length (file);
+		lock_release (&filesys_lock);
+
+		if (file_ofs < 0 || file_ofs > length)
 			goto done;
+
+		lock_acquire (&filesys_lock);
 		file_seek (file, file_ofs);
 
 		/*
 		 * 현재 프로그램 헤더 1개를 읽고 다음 헤더 위치로 이동
 		 */
-		if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
+		bool phdr_read_success = file_read (file, &phdr, sizeof phdr) == sizeof phdr;
+		lock_release (&filesys_lock);
+		if (!phdr_read_success)
 			goto done;
 		file_ofs += sizeof phdr;
 
@@ -1101,8 +1215,16 @@ done:
 	if (fn_copy != NULL)
 		palloc_free_page (fn_copy);
 
-	if (file != NULL)
+	if (success && file != NULL) {
+		t->running_file = file;
+		file = NULL;
+	}
+
+	if (file != NULL) {
+		lock_acquire (&filesys_lock);
 		file_close (file);
+		lock_release (&filesys_lock);
+	}
 	return success;
 }
 
@@ -1139,7 +1261,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 	ASSERT (pg_ofs (upage) == 0);
 	ASSERT (ofs % PGSIZE == 0);
 
-	file_seek (file, ofs);
 	while (read_bytes > 0 || zero_bytes > 0) {
 		/*
 		 * 이 페이지를 어떻게 채울지 계산한다.
@@ -1159,10 +1280,16 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		/*
 		 * 이 페이지를 로드한다.
 		 */
-		if (file_read (file, kpage, page_read_bytes) !=
-		    (int) page_read_bytes) {
-			palloc_free_page (kpage);
-			return false;
+		if (page_read_bytes > 0) {
+			lock_acquire (&filesys_lock);
+			off_t bytes_read =
+			        file_read_at (file, kpage, page_read_bytes, ofs);
+			lock_release (&filesys_lock);
+			if (bytes_read != (off_t) page_read_bytes) {
+				palloc_free_page (kpage);
+				return false;
+			}
+			ofs += page_read_bytes;
 		}
 		memset (kpage + page_read_bytes, 0, page_zero_bytes);
 
