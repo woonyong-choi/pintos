@@ -488,10 +488,10 @@ check_address (const void *addr) {
 static void
 validate_user_buffer (const void *buffer, unsigned size, bool write,
                       struct intr_frame *f) {
+	const uint8_t *addr;
+	const uint8_t *end;
 	uintptr_t start;
 	uintptr_t last;
-	uintptr_t page;
-	uintptr_t end;
 
 	if (size == 0)
 		return;
@@ -501,10 +501,18 @@ validate_user_buffer (const void *buffer, unsigned size, bool write,
 	if (buffer == NULL || last < start)
 		exit (-1);
 
-	page = (uintptr_t) pg_round_down ((const void *) start);
-	end = (uintptr_t) pg_round_down ((const void *) last);
-	for (; page <= end; page += PGSIZE)
-		validate_user_addr ((const void *) page, write, f);
+	addr = buffer;
+	end = (const uint8_t *) buffer + size;
+	while (addr < end) {
+		uintptr_t next_page;
+
+		validate_user_addr (addr, write, f);
+
+		next_page = (uintptr_t) pg_round_down (addr) + PGSIZE;
+		if (next_page <= (uintptr_t) addr)
+			break;
+		addr = (const uint8_t *) next_page;
+	}
 }
 
 static void

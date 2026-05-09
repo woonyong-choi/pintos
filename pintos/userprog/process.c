@@ -30,10 +30,15 @@ static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
 static bool duplicate_fd_table (struct thread *curr, struct thread *parent);
+static bool duplicate_running_file (struct thread *curr, struct thread *parent);
 static void close_open_files (struct thread *curr);
-static void reparent_or_reap_children (struct thread *curr, struct thread *root);
+static void reparent_or_reap_children (struct thread *curr);
 static void finish_self_status (struct thread *curr);
 static void close_running_file (struct thread *curr);
+static void ensure_orphan_status_list (void);
+
+static struct list orphan_status_list;
+static bool orphan_status_list_initialized;
 
 struct fork_args {
 	struct thread *parent;   // fork를 호출한 부모 스레드
@@ -69,6 +74,8 @@ process_create_initd (const char *file_name) {
 
 	if (curr == NULL)
 		return TID_ERROR;
+
+	ensure_orphan_status_list ();
 
 	/*
 	 * 커널 풀에서 페이지 메모리 할당, 0 = 커널 영역(유저 옵션 없음)
@@ -300,6 +307,18 @@ error:
 	return false;
 }
 
+static bool
+duplicate_running_file (struct thread *curr, struct thread *parent) {
+	if (curr == NULL || parent == NULL)
+		return false;
+
+	if (parent->running_file == NULL)
+		return true;
+
+	curr->running_file = file_duplicate (parent->running_file);
+	return curr->running_file != NULL;
+}
+
 /*
  * 부모의 실행 문맥을 복사하는 스레드 함수.
  * 힌트) parent->tf에는 프로세스의 유저랜드 문맥이 들어 있지 않다.
@@ -310,7 +329,7 @@ error:
  * 핵심 순서:
  *   1. 부모의 인터럽트 프레임(레지스터) 복사
  *   2. 부모의 페이지 테이블 복제 (duplicate_pte)
- *   3. 부모의 fd_table 복제 (file_duplicate)
+ *   3. 부모의 fd_table과 running_file 복제
  *   4. 자식의 fork 반환값을 0으로 설정
  *   5. 부모에게 "복제 완료" 알림, do_iret으로 유저 모드 진입 */
 
@@ -349,6 +368,9 @@ __do_fork (void *aux) {
 #endif
 
 	if (!duplicate_fd_table (curr, parent))
+		goto error;
+
+	if (!duplicate_running_file (curr, parent))
 		goto error;
 
 	/* 자식 프로세스에서 fork()의 반환값은 0이다. */
@@ -492,11 +514,21 @@ close_open_files (struct thread *curr) {
 }
 
 static void
-reparent_or_reap_children (struct thread *curr, struct thread *root) {
+ensure_orphan_status_list (void) {
+	if (!orphan_status_list_initialized) {
+		list_init (&orphan_status_list);
+		orphan_status_list_initialized = true;
+	}
+}
+
+static void
+reparent_or_reap_children (struct thread *curr) {
 	struct list_elem *e;
 
-	if (curr == NULL || root == NULL || root == curr)
+	if (curr == NULL)
 		return;
+
+	ensure_orphan_status_list ();
 
 	e = list_begin (&curr->child_status_list);
 	while (e != list_end (&curr->child_status_list)) {
@@ -511,7 +543,7 @@ reparent_or_reap_children (struct thread *curr, struct thread *root) {
 
 		cs->orphaned = true;
 		list_remove (&cs->elem);
-		list_push_back (&root->child_status_list, &cs->elem);
+		list_push_back (&orphan_status_list, &cs->elem);
 	}
 }
 
@@ -573,12 +605,10 @@ close_running_file (struct thread *curr) {
 void
 process_exit (void) {
 	struct thread *curr = thread_current ();
-	struct thread *root;
 
 	if (curr == NULL)
 		return;
 
-	root = thread_root ();
 #ifdef VM
 	process_cleanup ();
 	close_running_file (curr);
@@ -587,8 +617,10 @@ process_exit (void) {
 	close_running_file (curr); // 추가 
 	close_open_files (curr);
 #endif
-	reparent_or_reap_children (curr, root);
+	reparent_or_reap_children (curr);
 	finish_self_status (curr);
+	if (thread_root () == curr)
+		thread_set_root (NULL);
 #ifndef VM
 	process_cleanup ();
 #endif
