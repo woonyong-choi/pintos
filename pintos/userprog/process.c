@@ -772,6 +772,38 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
 
+/* PHDR이 유효한 로드 가능한 세그먼트인지 확인하고 true를 반환한다. */
+static bool
+validate_segment (const struct Phdr *phdr, struct file *file) {
+	/* p_offset과 p_vaddr은 동일한 페이지 오프셋을 가져야 한다. */
+	if ((phdr->p_offset & PGMASK) != (phdr->p_vaddr & PGMASK))
+		return false;
+
+	/* p_offset은 파일 내부에 있어야 한다. */
+	if (phdr->p_offset > (uint64_t) file_length (file))
+		return false;
+
+	/* p_memsz는 p_filesz보다 크거나 같아야 한다. */
+	if (phdr->p_memsz < phdr->p_filesz)
+		return false;
+
+	/* 세그먼트는 가상 메모리의 유저 영역 내에 위치해야 한다. */
+	if (!is_user_vaddr ((void *) phdr->p_vaddr))
+		return false;
+	if (!is_user_vaddr ((void *) (phdr->p_vaddr + phdr->p_memsz)))
+		return false;
+
+	/* 주소 영역이 감싸지는 형태가 아니어야 한다. */
+	if (phdr->p_vaddr + phdr->p_memsz < phdr->p_vaddr)
+		return false;
+
+	/* 0번 페이지는 매핑하지 않는다. */
+	if (phdr->p_vaddr < PGSIZE)
+		return false;
+
+	return true;
+}
+
 /*
  * FILE_NAME의 ELF 실행 파일을 현재 스레드에 로드한다.
  * 실행 파일의 진입점을 *RIP에 저장하고,
@@ -1193,41 +1225,6 @@ install_page (void *upage, void *kpage, bool writable) {
 	 */
 	return (pml4_get_page (t->pml4, upage) == NULL &&
 	        pml4_set_page (t->pml4, upage, kpage, writable));
-}
-
-/* 구현이 안된 이 함수를 넣으라고 함 */
-/* PHDR이 유효한 로드 가능한 세그먼트인지 확인하고 true를 반환합니다. */
-static bool
-validate_segment (const struct Phdr *phdr, struct file *file) {
-	/* p_offset과 p_vaddr은 동일한 페이지 오프셋을 가져야 합니다. */
-	if ((phdr->p_offset & PGMASK) != (phdr->p_vaddr & PGMASK))
-		return false;
-
-	/* p_offset은 파일 내부에 있어야 합니다. */
-	if (phdr->p_offset > (uint64_t) file_length (file))
-		return false;
-
-	/* p_memsz는 p_filesz보다 크거나 같아야 합니다. */
-	if (phdr->p_memsz < phdr->p_filesz)
-		return false;
-
-	/* 세그먼트는 가상 메모리의 유저 영역 내에 위치해야 합니다. */
-	if (!is_user_vaddr ((void *) phdr->p_vaddr))
-		return false;
-	if (!is_user_vaddr ((void *) (phdr->p_vaddr + phdr->p_memsz)))
-		return false;
-
-	/* 주소 영역이 감싸지는(wrap around) 형태가 아니어야 합니다. */
-	if (phdr->p_vaddr + phdr->p_memsz < phdr->p_vaddr)
-		return false;
-
-	/* 0번 페이지는 매핑하지 않습니다.
-	   (NULL 포인터 역참조를 잡기 위해 유효하지 않은 주소로 둡니다.) */
-	if (phdr->p_vaddr < PGSIZE)
-		return false;
-
-	/* 괜찮은 것 같습니다. */
-	return true;
 }
 
 #else
