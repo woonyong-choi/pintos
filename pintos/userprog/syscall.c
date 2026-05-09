@@ -297,9 +297,7 @@ open (const char *file, struct intr_frame *f) {
 
 void
 close (int fd) {
-	lock_acquire (&filesys_lock);
 	process_close_file (fd);
-	lock_release (&filesys_lock);
 }
 
 int
