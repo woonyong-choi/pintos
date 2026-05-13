@@ -9,7 +9,7 @@ static uint64_t test_hash (const struct hash_elem *e, void *aux UNUSED);
 static bool test_less (const struct hash_elem *a,
 		const struct hash_elem *b, void *aux UNUSED);
 static void hash_self_test (void);
-static uint64_t page_hash (struct hash_elem *e);
+static uint64_t page_hash (const struct hash_elem *e);
 
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
@@ -70,23 +70,41 @@ err:
 }
 
 /* Find VA from spt and return page. On error, return NULL. */
+/* 페이지 폴트가 발생하면 spt 에서 va로 메타 데이터를 찾는 함수 */
 struct page *
 spt_find_page (struct supplemental_page_table *spt, void *va) {
-	struct page *page = NULL;
+	
 	/* TODO: Fill this function. */
-	int va = pg_round_down(va);
-	page->va = va; 
-
-	return page;
+	// 1. pg_round_down 으로 페이지폴트 난 주소에서부터 첫 page의 주소를 찾는다. 
+	void * rounded_va = pg_round_down(va);
+	struct page temp;
+	temp.va = rounded_va; 
+	// 2. spt 에 접근해 현재 va에 있는지 확인하고 있으면 접근 없으면 nopage(invaild access) 종료한다.  
+	// 2.1 접근 하는 방법이 뭐지 spt와 va 가 있으니까 spt안에 hash 구조체 만들고 그안에 bucket에 인덱스 조사하면 되나 
+	// 근데 그렇게 설계하면 다른 elem 쓰는 리스트,ex)스레드 와 겹칠수 있지않나
+	// page 구조체에 hash_elem 타입의 hash_elem 선언 
+	struct hash_elem * elem = hash_find(&spt->hash_table, &temp.hash_elem);
+	if (elem == NULL) {
+		return NULL;
+	}
+	
+	struct page *found_page = hash_entry(elem, struct page, hash_elem);
+	return found_page;
 }
 
 /* Insert PAGE into spt with validation. */
 bool
-spt_insert_page (struct supplemental_page_table *spt UNUSED,
-		struct page *page UNUSED) {
+spt_insert_page (struct supplemental_page_table *spt,
+		struct page *page) {
 	int succ = false;
 	/* TODO: Fill this function. */
-
+	/* 받은 page를 hash_insert 해준다 */
+	/* 필요한거 1. hash 구조체 2. table의 hash_elem */
+	
+	/* hash_insert 반환값이 NULL 이면 삽입 성공 */
+	if (hash_insert (&spt->hash_table, &page->hash_elem) == NULL) {
+		succ = true;
+	}
 	return succ;
 }
 
@@ -184,7 +202,7 @@ vm_do_claim_page (struct page *page) {
 
 /* Initialize new supplemental page table */
 void
-supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
+supplemental_page_table_init (struct supplemental_page_table *spt) {
 	struct hash h;
 
 	ASSERT(hash_init(&h, page_hash, page_less, NULL));
@@ -207,15 +225,17 @@ supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 
 static uint64_t
 page_hash (const struct hash_elem *e) {
-	struct page *item = hash_entry (e, struct page, elem);
-	return hash_int (item->va);
+	struct page *item = hash_entry (e, struct page, hash_elem);
+	uint64_t hash_va = hash_int (item->va);
+
+	return hash_va;
 }
 
 static bool
 page_less (const struct hash_elem *a, const struct hash_elem *b,
 		void *aux UNUSED) {
-	struct page *page_one = hash_entry (a, struct page, elem);
-	struct page *page_two = hash_entry (b, struct page, elem);
+	struct page *page_one = hash_entry (a, struct page, hash_elem);
+	struct page *page_two = hash_entry (b, struct page, hash_elem);
 	return page_one->va < page_two->va;
 }
 

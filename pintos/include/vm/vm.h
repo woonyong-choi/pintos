@@ -48,7 +48,7 @@ struct page {
 
 	/* 구현부 */
 	/* HOSEOK'S CODE */
-	struct hash_elem elem;
+	struct hash_elem hash_elem;
 	/* HOSEOK'S CODE */
 	
 	/* 타입별 데이터는 union에 묶여 있다.
@@ -89,6 +89,7 @@ struct page_operations {
  * 이 구조체 설계는 특정 방식으로 강제하지 않는다.
  * 설계는 전적으로 구현자 선택이다. */
 struct supplemental_page_table {
+	struct hash hash_table;
 };
 
 #include "threads/thread.h"
