@@ -3,6 +3,14 @@
 #include "threads/malloc.h"
 #include "vm/vm.h"
 #include "vm/inspect.h"
+/* HOSEOK'S CODE */
+#include "hash.h"
+static uint64_t test_hash (const struct hash_elem *e, void *aux UNUSED);
+static bool test_less (const struct hash_elem *a,
+		const struct hash_elem *b, void *aux UNUSED);
+static void hash_self_test (void);
+static uint64_t page_hash (struct hash_elem *e);
+
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -16,6 +24,7 @@ vm_init (void) {
 	register_inspect_intr ();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
+	hash_self_test (); 
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -62,9 +71,11 @@ err:
 
 /* Find VA from spt and return page. On error, return NULL. */
 struct page *
-spt_find_page (struct supplemental_page_table *spt UNUSED, void *va UNUSED) {
+spt_find_page (struct supplemental_page_table *spt, void *va) {
 	struct page *page = NULL;
 	/* TODO: Fill this function. */
+	int va = pg_round_down(va);
+	page->va = va; 
 
 	return page;
 }
@@ -174,6 +185,11 @@ vm_do_claim_page (struct page *page) {
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt UNUSED) {
+	struct hash h;
+
+	ASSERT(hash_init(&h, page_hash, page_less, NULL));
+	ASSERT(hash_empty(&h)); 
+
 }
 
 /* Copy supplemental page table from src to dst */
@@ -188,3 +204,18 @@ supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 	/* TODO: Destroy all the supplemental_page_table hold by thread and
 	 * TODO: writeback all the modified contents to the storage. */
 }
+
+static uint64_t
+page_hash (const struct hash_elem *e) {
+	struct page *item = hash_entry (e, struct page, elem);
+	return hash_int (item->va);
+}
+
+static bool
+page_less (const struct hash_elem *a, const struct hash_elem *b,
+		void *aux UNUSED) {
+	struct page *page_one = hash_entry (a, struct page, elem);
+	struct page *page_two = hash_entry (b, struct page, elem);
+	return page_one->va < page_two->va;
+}
+

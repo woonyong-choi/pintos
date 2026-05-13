@@ -2,7 +2,7 @@
 #define VM_VM_H
 #include <stdbool.h>
 #include "threads/palloc.h"
-
+#include "hash.h"
 enum vm_type {
 	/* 아직 초기화되지 않은 페이지 */
 	VM_UNINIT = 0,
@@ -47,7 +47,10 @@ struct page {
 	struct frame *frame;   /* frame에서 page로 되돌아오는 참조 */
 
 	/* 구현부 */
-
+	/* HOSEOK'S CODE */
+	struct hash_elem elem;
+	/* HOSEOK'S CODE */
+	
 	/* 타입별 데이터는 union에 묶여 있다.
 	 * 각 함수는 현재 어떤 union 멤버를 써야 하는지 자동으로 판단한다. */
 	union {
