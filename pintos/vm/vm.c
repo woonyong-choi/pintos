@@ -1,16 +1,16 @@
 /* vm.c: Generic interface for virtual memory objects. */
 
 #include "threads/malloc.h"
+#include "threads/vaddr.h"
 #include "vm/vm.h"
 #include "vm/inspect.h"
 /* HOSEOK'S CODE */
 #include "hash.h"
-static uint64_t test_hash (const struct hash_elem *e, void *aux UNUSED);
-static bool test_less (const struct hash_elem *a,
-		const struct hash_elem *b, void *aux UNUSED);
-static void hash_self_test (void);
-static uint64_t page_hash (const struct hash_elem *e);
 
+static uint64_t page_hash (const struct hash_elem *e, void *aux UNUSED);
+static bool page_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
+
+static struct list frame_table; // 물리 공간에 할당된 frame 객체들을 관리하기 위한 전역변수 
 
 /* Initializes the virtual memory subsystem by invoking each subsystem's
  * intialize codes. */
@@ -24,7 +24,7 @@ vm_init (void) {
 	register_inspect_intr ();
 	/* DO NOT MODIFY UPPER LINES. */
 	/* TODO: Your code goes here. */
-	hash_self_test (); 
+	list_init(&frame_table);
 }
 
 /* Get the type of the page. This function is useful if you want to know the
@@ -80,9 +80,7 @@ spt_find_page (struct supplemental_page_table *spt, void *va) {
 	struct page temp;
 	temp.va = rounded_va; 
 	// 2. spt 에 접근해 현재 va에 있는지 확인하고 있으면 접근 없으면 nopage(invaild access) 종료한다.  
-	// 2.1 접근 하는 방법이 뭐지 spt와 va 가 있으니까 spt안에 hash 구조체 만들고 그안에 bucket에 인덱스 조사하면 되나 
-	// 근데 그렇게 설계하면 다른 elem 쓰는 리스트,ex)스레드 와 겹칠수 있지않나
-	// page 구조체에 hash_elem 타입의 hash_elem 선언 
+	// 2.1 접근 하는 방법이 뭐지 spt와 va 가 있으니까 spt안에 hash 구조체 만들고 그안에 bucket에 인덱스 조사하면 되나 -> // page 구조체에 hash_elem 타입의 hash_elem 선언
 	struct hash_elem * elem = hash_find(&spt->hash_table, &temp.hash_elem);
 	if (elem == NULL) {
 		return NULL;
@@ -99,7 +97,7 @@ spt_insert_page (struct supplemental_page_table *spt,
 	int succ = false;
 	/* TODO: Fill this function. */
 	/* 받은 page를 hash_insert 해준다 */
-	/* 필요한거 1. hash 구조체 2. table의 hash_elem */
+	/* 필요한거 1. hash 구조체 2. page의 hash_elem */
 	
 	/* hash_insert 반환값이 NULL 이면 삽입 성공 */
 	if (hash_insert (&spt->hash_table, &page->hash_elem) == NULL) {
@@ -110,8 +108,10 @@ spt_insert_page (struct supplemental_page_table *spt,
 
 void
 spt_remove_page (struct supplemental_page_table *spt, struct page *page) {
+	hash_delete (&spt->hash_table, &page->hash_elem);
 	vm_dealloc_page (page);
-	return true;
+
+	// return true;
 }
 
 /* Get the struct frame, that will be evicted. */
@@ -137,13 +137,53 @@ vm_evict_frame (void) {
  * and return it. This always return valid address. That is, if the user pool
  * memory is full, this function evicts the frame to get the available memory
  * space.*/
+/* palloc()을 호출해서 프레임을 얻는다.
+ * 사용 가능한 페이지가 없으면, 기존 페이지 하나를 eviction해서
+ * 그 프레임을 반환한다.
+ *
+ * 이 함수는 항상 유효한 주소를 반환한다.
+ * 즉, user pool 메모리가 가득 차 있더라도 페이지를 eviction해서
+ * 사용할 수 있는 메모리 공간을 확보한다.
+ */
+/* user pool 에서 공간 할당 받아오기 */
 static struct frame *
 vm_get_frame (void) {
-	struct frame *frame = NULL;
+	struct frame *frame;
 	/* TODO: Fill this function. */
+	// 왜 palloc도 하고 malloc도 하라는거지 
+	// page와 frame은 양방향 선언되있음 
+	// page->frame: page fault 처리중 이 page가 어느 frame에 올라갔는지 알아야함 
+	// frame->page: evction 처리, 어느 page를 쫒을지 고민하기 위해 알아야함
+	frame = malloc(sizeof* frame);
+	if (frame == NULL) {
+		return NULL; 
+	}
 
-	ASSERT (frame != NULL);
-	ASSERT (frame->page == NULL);
+	void *kva = palloc_get_page(PAL_USER); 
+	if(kva != NULL) {
+		
+		frame->kva = kva;
+		frame->page = NULL;
+	}
+	else {
+		/*eviction 하는 코드 */
+		/*eviction 시도는 어떻게 하지 */
+		free(frame);
+		return NULL;
+	}
+
+	/*
+	list_init(&frame_table) vm 초기화 시점에 있어야함
+
+	lock_acquire(&frame_table_lock)
+	list_push_back(...)
+	lock_release(&frame_table_lock)
+	 */
+	list_push_back(&frame_table, &frame->elem);
+
+	// ASSERT (frame != NULL);
+	// ASSERT (frame->page == NULL);
+
 	return frame;
 }
 
@@ -155,6 +195,7 @@ vm_stack_growth (void *addr UNUSED) {
 /* Handle the fault on write_protected page */
 static bool
 vm_handle_wp (struct page *page UNUSED) {
+	return false;
 }
 
 /* Return true on success */
@@ -203,17 +244,15 @@ vm_do_claim_page (struct page *page) {
 /* Initialize new supplemental page table */
 void
 supplemental_page_table_init (struct supplemental_page_table *spt) {
-	struct hash h;
-
-	ASSERT(hash_init(&h, page_hash, page_less, NULL));
-	ASSERT(hash_empty(&h)); 
-
+	ASSERT(hash_init(&spt->hash_table, page_hash, page_less, NULL));
+	ASSERT(hash_empty(&spt->hash_table));
 }
 
 /* Copy supplemental page table from src to dst */
 bool
 supplemental_page_table_copy (struct supplemental_page_table *dst UNUSED,
 		struct supplemental_page_table *src UNUSED) {
+	return false;
 }
 
 /* Free the resource hold by the supplemental page table */
@@ -224,9 +263,9 @@ supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
 }
 
 static uint64_t
-page_hash (const struct hash_elem *e) {
+page_hash (const struct hash_elem *e, void *aux UNUSED) {
 	struct page *item = hash_entry (e, struct page, hash_elem);
-	uint64_t hash_va = hash_int (item->va);
+	uint64_t hash_va = hash_bytes (&item->va, sizeof item->va);
 
 	return hash_va;
 }
@@ -238,4 +277,3 @@ page_less (const struct hash_elem *a, const struct hash_elem *b,
 	struct page *page_two = hash_entry (b, struct page, hash_elem);
 	return page_one->va < page_two->va;
 }
-
