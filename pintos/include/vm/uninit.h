@@ -17,7 +17,7 @@ struct uninit_page {
 	/* struct page를 초기화하고 pa를 va에 매핑하는 함수. */
 	bool (*page_initializer) (struct page *, enum vm_type, void *kva);
 };
-
+ 
 void uninit_new (struct page *page, void *va, vm_initializer *init,
 		enum vm_type type, void *aux,
 		bool (*initializer)(struct page *, enum vm_type, void *kva));

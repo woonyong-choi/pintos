@@ -49,21 +49,60 @@ static struct frame *vm_evict_frame (void);
 /* Create the pending page object with initializer. If you want to create a
  * page, do not create it directly and make it through this function or
  * `vm_alloc_page`. */
+/* initializer를 가진 pending page 객체를 생성한다.
+ * page를 만들고 싶다면 직접 만들지 말고,
+ * 이 함수나 `vm_alloc_page`를 통해 만들어라. */
+
+/* SPT에 “나중에 로드될 page 메타데이터”를 등록하는 함수 */
 bool
 vm_alloc_page_with_initializer (enum vm_type type, void *upage, bool writable,
 		vm_initializer *init, void *aux) {
-
-	ASSERT (VM_TYPE(type) != VM_UNINIT)
+	ASSERT(pg_ofs(upage) == 0);		
+	ASSERT (VM_TYPE(type) != VM_UNINIT);
 
 	struct supplemental_page_table *spt = &thread_current ()->spt;
-
+	
+	if (upage == NULL)
+		goto err;
 	/* Check wheter the upage is already occupied or not. */
+	/*2. upage가 이미 spt에 등록되어있는지 확인한다. */
 	if (spt_find_page (spt, upage) == NULL) {
-		/* TODO: Create the page, fetch the initialier according to the VM type,
-		 * TODO: and then create "uninit" page struct by calling uninit_new. You
-		 * TODO: should modify the field after calling the uninit_new. */
+		/* TODO: 페이지를 생성하고, VM 타입에 맞는 initializer를 가져온다.
+		 * TODO: 그런 다음 uninit_new를 호출해서 "uninit" page 구조체를 생성한다.
+ 		 * TODO: uninit_new를 호출한 뒤에는 필요한 필드를 수정해야 한다. */
+		 /* TODO: page를 spt에 삽입한다. */
 
-		/* TODO: Insert the page into the spt. */
+		 /* 3. page를 동적할당한다. */
+		struct page* page = malloc(sizeof *page);
+		if (page == NULL)
+			goto err;
+		/* 4. anon타입, file타입을 정해준다*/
+		bool (*initializer)(struct page *page, enum vm_type type, void *kva) = NULL;
+
+		switch (VM_TYPE(type)) {
+			case VM_ANON:
+				initializer = anon_initializer;
+				break;
+			
+			case VM_FILE:
+				initializer = file_backed_initializer;
+				break;
+			
+			default:
+				free(page);
+				goto err;
+		}
+		
+		uninit_new(page, upage, init, type, aux, initializer);
+		page->rw = writable;
+
+		if(!spt_insert_page(spt, page)) {
+			free(page);
+			goto err;
+		}
+		else {
+			return true;
+		}
 	}
 err:
 	return false;
@@ -76,7 +115,7 @@ spt_find_page (struct supplemental_page_table *spt, void *va) {
 	
 	/* TODO: Fill this function. */
 	// 1. pg_round_down 으로 페이지폴트 난 주소에서부터 첫 page의 주소를 찾는다. 
-	void * rounded_va = pg_round_down(va);
+	void * rounded_va = pg_round_down(va); // 0x411234 -> 0x411000
 	struct page temp;
 	temp.va = rounded_va; 
 	// 2. spt 에 접근해 현재 va에 있는지 확인하고 있으면 접근 없으면 nopage(invaild access) 종료한다.  
@@ -145,7 +184,9 @@ vm_evict_frame (void) {
  * 즉, user pool 메모리가 가득 차 있더라도 페이지를 eviction해서
  * 사용할 수 있는 메모리 공간을 확보한다.
  */
-/* user pool 에서 공간 할당 받아오기 */
+/* user pool 에서 공간 할당 받아오기
+frame에 올리기 위해 할당받는곳 
+ */
 static struct frame *
 vm_get_frame (void) {
 	struct frame *frame;
@@ -161,7 +202,6 @@ vm_get_frame (void) {
 
 	void *kva = palloc_get_page(PAL_USER); 
 	if(kva != NULL) {
-		
 		frame->kva = kva;
 		frame->page = NULL;
 	}
@@ -184,6 +224,7 @@ vm_get_frame (void) {
 	// ASSERT (frame != NULL);
 	// ASSERT (frame->page == NULL);
 
+	// 만든 frame free는 언제하지 
 	return frame;
 }
 
@@ -219,25 +260,42 @@ vm_dealloc_page (struct page *page) {
 }
 
 /* Claim the page that allocate on VA. */
+/* 인자로 받은 va에 해당하는 page를 SPT에서 찾고, 그 page를 실제 frame에 올리는 함수 */
 bool
-vm_claim_page (void *va UNUSED) {
-	struct page *page = NULL;
-	/* TODO: Fill this function */
+vm_claim_page (void *va) {
+	struct page *page;
 
-	return vm_do_claim_page (page);
+	page = spt_find_page(&thread_current()->spt, va);
+
+	/* TODO: Fill this function */
+	/* 현재 스레드의 spt에 접근해서 인자로 받은 va값에 대응되는 버켓이 있는지 확인?*/
+	if (page != NULL) {
+		return vm_do_claim_page (page);
+	}
+	else {
+		return false;
+	}
+	
 }
 
 /* Claim the PAGE and set up the mmu. */
+/* PAGE를 claim하고 MMU를 설정한다. */
+/* 해당 page를 현재 프로세스가 실제로 사용할 수 있게 확보하고, 
+MMU가 그 페이지를 올바르게 주소 변환할 수 있도록 페이지 테이블 같은 메모리 매핑 정보를 설정한다는 뜻*/
 static bool
 vm_do_claim_page (struct page *page) {
+	/* 확보 */
 	struct frame *frame = vm_get_frame ();
 
 	/* Set links */
 	frame->page = page;
 	page->frame = frame;
 
+	pml4_set_page (thread_current()->pml4, page->va, frame->kva, page->rw);
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
-
+	/* TODO: page의 VA를 frame의 PA에 매핑하는 페이지 테이블 엔트리를 삽입한다. */
+	
+	
 	return swap_in (page, frame->kva);
 }
 

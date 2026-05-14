@@ -49,6 +49,7 @@ struct page {
 	/* 구현부 */
 	/* HOSEOK'S CODE */
 	struct hash_elem hash_elem;
+	bool rw;
 	/* HOSEOK'S CODE */
 	
 	/* 타입별 데이터는 union에 묶여 있다.
