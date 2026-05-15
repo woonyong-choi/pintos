@@ -53,6 +53,14 @@ struct initd_args {
 	struct child_status *cs; // 부모가 만든 자식 상태 레코드
 };
 
+/* lazy_load에서 메모리에 올리기 위한 정보  */
+struct lazy_load_arg {
+    struct file *file;
+    off_t ofs;
+    size_t page_read_bytes;
+    size_t page_zero_bytes;
+};
+
 /* fd_table 최대 슬롯 수 (4KB 페이지 / 포인터 크기). */
 #define FD_MAX (PGSIZE / sizeof (struct file *))
 
@@ -1391,8 +1399,12 @@ lazy_load_segment (struct page *page, void *aux) {
 static bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
               uint32_t read_bytes, uint32_t zero_bytes, bool writable) {
-	ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
+	
+	// 1. 전체 read_bytes + zero_bytes가 page 크기 단위인지 검사
+	ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0); 
+	// 2. upage가 page-aligned인지 검사
 	ASSERT (pg_ofs (upage) == 0);
+	// 3. file offset이 page-aligned인지 검사
 	ASSERT (ofs % PGSIZE == 0);
 
 	while (read_bytes > 0 || zero_bytes > 0) {
@@ -1406,18 +1418,37 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
 		/*
 		 * TODO: lazy_load_segment에 정보를 전달할 aux를 설정하라.
-		 */
-		void *aux = NULL;
-		if (!vm_alloc_page_with_initializer (VM_ANON, upage, writable,
-		                                     lazy_load_segment, aux))
+		 aux 구조체 정의 aux안에 들어가는 정보(file, offset, page_read_bytes, page_zero_bytes)
+
+		 1. lazy_load_segment에 건네줄 aux를 동적 할당한다. 
+		 2. aux 를 선언해 준다. 
+		 3. aux 에 넣어준다. 
+
+		 나중에 aux 값 꺼낼때 lazy_load_args 타입으로 해야함
+		 */	
+
+		struct lazy_load_arg * aux = malloc(sizeof *aux);
+		if (aux == NULL)
 			return false;
 
+		//file 포인터 생명주기 주의?
+		aux->file = file;
+		aux->ofs = ofs;
+		aux->page_read_bytes = page_read_bytes;
+		aux->page_zero_bytes = page_zero_bytes;
+		
+		if (!vm_alloc_page_with_initializer (VM_ANON, upage, writable,
+		                                     lazy_load_segment, aux)) {
+			free(aux);
+			return false;																		
+			}	
 		/*
 		 * 다음 페이지로 진행한다.
 		 */
 		read_bytes -= page_read_bytes;
 		zero_bytes -= page_zero_bytes;
 		upage += PGSIZE;
+		ofs += page_read_bytes;
 	}
 	return true;
 }

@@ -50,8 +50,8 @@ uninit_initialize (struct page *page, void *kva) {
 	/* Fetch first, page_initialize may overwrite the values */
 	vm_initializer *init = uninit->init;
 	void *aux = uninit->aux;
-
 	/* TODO: You may need to fix this function. */
+	/* vm_alloc_page_with_initializer 에서 등록해놓은 함수를 반환한다. */
 	return uninit->page_initializer (page, uninit->type, kva) &&
 		(init ? init (page, aux) : true);
 }

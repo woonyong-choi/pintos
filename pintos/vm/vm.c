@@ -295,7 +295,6 @@ vm_do_claim_page (struct page *page) {
 	/* TODO: Insert page table entry to map page's VA to frame's PA. */
 	/* TODO: page의 VA를 frame의 PA에 매핑하는 페이지 테이블 엔트리를 삽입한다. */
 	
-	
 	return swap_in (page, frame->kva);
 }
 
