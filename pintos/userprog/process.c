@@ -1371,6 +1371,7 @@ install_page (void *upage, void *kpage, bool writable) {
 static bool
 lazy_load_segment (struct page *page, void *aux) {
 	/*
+
 	 * TODO: 파일에서 세그먼트를 로드하라.
 	 */
 	/*
@@ -1379,6 +1380,32 @@ lazy_load_segment (struct page *page, void *aux) {
 	/*
 	 * TODO: 이 함수를 호출할 때 VA를 사용할 수 있다.
 	 */
+	//  1 .aux에서 로딩 정보를 꺼냅니다.
+	 struct lazy_load_arg *lazy_aux = aux;
+	 
+	//  2. page에서 frame을 찾습니다.
+	void* kva = page->frame->kva;
+	off_t file_read_bytes;
+
+	if (lazy_aux->page_read_bytes > 0) {
+		file_read_bytes = file_read_at(lazy_aux->file,kva, lazy_aux->page_read_bytes, lazy_aux->ofs);	
+	}
+	
+	if(file_read_bytes == lazy_aux->page_read_bytes) {
+
+		return true;
+	}
+	
+	//  3. 파일에서 page_read_bytes만큼 읽습니다.  파일의 offset 위치부터 page_read_bytes만큼 읽어서, 메모리의 kva 주소부터 page_read_bytes만큼 채운다.
+	
+
+	//  4. 읽은 뒤 남은 부분을 0으로 채웁니다.
+	//  5. 성공하면 true를 반환합니다.
+	//  6. 더 이상 필요 없는 aux는 정리해야 합니다.
+
+	 
+
+
 }
 
 /*
