@@ -13,6 +13,12 @@
  * OS를 중단시킨다. */
 #define PANIC(...) debug_panic (__FILE__, __LINE__, __func__, __VA_ARGS__)
 
+/* 조건 방어 후 조기 반환. */
+#define RETURN_IF(CONDITION) \
+	do { if (CONDITION) return; } while (0)
+#define RETURN_VALUE_IF(CONDITION, VALUE) \
+	do { if (CONDITION) return (VALUE); } while (0)
+
 void debug_panic (const char *file, int line, const char *function,
 		const char *message, ...) PRINTF_FORMAT (4, 5) NO_RETURN;
 void debug_backtrace (void);

@@ -53,14 +53,6 @@ struct initd_args {
 	struct child_status *cs; // 부모가 만든 자식 상태 레코드
 };
 
-/* lazy_load에서 메모리에 올리기 위한 정보  */
-struct lazy_load_arg {
-    struct file *file;
-    off_t ofs;
-    size_t page_read_bytes;
-    size_t page_zero_bytes;
-};
-
 /* fd_table 최대 슬롯 수 (4KB 페이지 / 포인터 크기). */
 #define FD_MAX (PGSIZE / sizeof (struct file *))
 
@@ -1489,10 +1481,12 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* USER_STACK에 스택용 PAGE를 만든다. 성공하면 true를 반환한다. */
 static bool
 setup_stack (struct intr_frame *if_) {
+	struct thread *curr = thread_current ();
 	bool success = false;
 	void *stack_bottom = (void *) (((uint8_t *) USER_STACK) - PGSIZE);
 
-	vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, false);
+	curr->stack_bottom = stack_bottom;
+	vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, true);
 	if (vm_claim_page(stack_bottom)) {
 		if_->rsp = USER_STACK;
 		success = true;

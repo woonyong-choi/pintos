@@ -549,6 +549,11 @@ init_thread (struct thread *t, const char *name, int priority) {
 	list_init (&t->child_status_list);     // 자식 상태 레코드 리스트 초기화
 	t->self_status = NULL;                 // 아직 연결된 child_status 없음
 #endif
+
+#ifdef VM
+	t->user_rsp = 0;
+	t->stack_bottom = NULL;
+#endif
 }
 
 /*

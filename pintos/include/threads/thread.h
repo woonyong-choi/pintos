@@ -150,6 +150,8 @@ struct thread {
 	 * 스레드가 소유한 전체 가상 메모리를 위한 테이블.
 	 */
 	struct supplemental_page_table spt;
+	uintptr_t user_rsp; // 커널 모드에서 참조할 마지막 유저 스택 포인터
+	void *stack_bottom; // 현재까지 할당된 유저 스택의 최하단 주소
 #endif
 	struct intr_frame tf; // 문맥 전환에 필요한 레지스터 문맥
 	unsigned magic;       // 스택 오버플로우 감지용 마법값
