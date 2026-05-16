@@ -27,21 +27,21 @@ enum intr_level intr_disable (void);
  * 인터럽트 스택 프레임.
  */
 struct gp_registers {
-	uint64_t r15;
-	uint64_t r14;
-	uint64_t r13;
-	uint64_t r12;
-	uint64_t r11;
-	uint64_t r10;
-	uint64_t r9;
-	uint64_t r8;
-	uint64_t rsi;
-	uint64_t rdi;
-	uint64_t rbp;
-	uint64_t rdx;
-	uint64_t rcx;
-	uint64_t rbx;
-	uint64_t rax;
+	uint64_t r15; /* 범용 레지스터, 함수 호출 뒤에도 보존되는 callee-saved 레지스터. */
+	uint64_t r14; /* 범용 레지스터, 함수 호출 뒤에도 보존되는 callee-saved 레지스터. */
+	uint64_t r13; /* 범용 레지스터, 함수 호출 뒤에도 보존되는 callee-saved 레지스터. */
+	uint64_t r12; /* 범용 레지스터, 함수 호출 뒤에도 보존되는 callee-saved 레지스터. */
+	uint64_t r11; /* 범용 임시 레지스터, syscall 진입 시 플래그 저장에도 쓰인다. */
+	uint64_t r10; /* 범용 임시 레지스터, syscall 인자 전달에 쓰일 수 있다. */
+	uint64_t r9;  /* 범용 레지스터, 함수/시스템 콜의 6번째 인자 전달에 쓰인다. */
+	uint64_t r8;  /* 범용 레지스터, 함수/시스템 콜의 5번째 인자 전달에 쓰인다. */
+	uint64_t rsi; /* Source index, 함수/시스템 콜의 2번째 인자 전달에 쓰인다. */
+	uint64_t rdi; /* Destination index, 함수/시스템 콜의 1번째 인자 전달에 쓰인다. */
+	uint64_t rbp; /* Base pointer, 현재 스택 프레임의 기준 주소로 주로 쓰인다. */
+	uint64_t rdx; /* Data register, 함수/시스템 콜의 3번째 인자 전달에 쓰인다. */
+	uint64_t rcx; /* Count register, 반복/시프트 명령이나 4번째 함수 인자에 쓰인다. */
+	uint64_t rbx; /* Base register, 함수 호출 뒤에도 보존되는 callee-saved 레지스터. */
+	uint64_t rax; /* Accumulator, 함수 반환값과 syscall 번호/반환값에 주로 쓰인다. */
 } __attribute__((packed));
 
 struct intr_frame {
@@ -73,12 +73,12 @@ struct intr_frame {
 	 * CPU가 푸시한 값들이다.
 	 * 이는 인터럽트된 태스크의 저장된 레지스터들이다.
 	 */
-	uintptr_t rip;
+	uintptr_t rip; /* Instruction pointer, 인터럽트가 발생했을 때 실행 중이던 명령어 주소. */
 	uint16_t cs;
 	uint16_t __pad5;
 	uint32_t __pad6;
 	uint64_t eflags;
-	uintptr_t rsp;
+	uintptr_t rsp; /* Stack pointer, 인터럽트가 발생했을 때의 스택 최상단 주소. */
 	uint16_t ss;
 	uint16_t __pad7;
 	uint32_t __pad8;
