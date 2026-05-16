@@ -8,6 +8,7 @@
 #include "hash.h"
 #include "userprog/process.h"
 #include "threads/mmu.h"
+#define STACK_MAX ((uintptr_t) 1 << 20) /* 유저 스택 최대 크기: 1MB */
 
 static struct list frame_table;
 
@@ -45,6 +46,14 @@ static bool vm_do_claim_page (struct page *page);
 static struct frame *vm_evict_frame (void);
 static uint64_t page_hash (const struct hash_elem *e, void *aux UNUSED);
 static bool page_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
+static bool vm_fault_addr_invalid (void *addr);
+static bool vm_handle_not_present_fault (struct intr_frame *f, void *addr,
+                                         bool user, bool write);
+static bool vm_claim_spt_page (void *addr, bool write);
+static bool vm_handle_unwritable_spt_page (struct page *page UNUSED);
+static bool vm_should_grow_stack (struct intr_frame *f, void *addr, bool user);
+static bool vm_grow_stack_and_claim (void *addr);
+static bool vm_handle_write_protect_fault (void *addr, bool write);
 
 static uint64_t
 page_hash (const struct hash_elem *e, void *aux UNUSED) {
@@ -238,36 +247,88 @@ vm_handle_wp (struct page *page UNUSED) {
 	return false;
 }
 
-// 수정필요 
+
+// OS가 복구할 수 있는 page fault를 처리
 bool
-vm_try_handle_fault (struct intr_frame *f UNUSED, void *addr UNUSED,
-                     bool user UNUSED, bool write UNUSED,
-                     bool not_present UNUSED)
-{
-  struct supplemental_page_table *spt UNUSED = &thread_current ()->spt;
-  struct page *page = NULL;
-  uintptr_t rsp = user ? f->rsp : thread_current ()->user_rsp;
+vm_try_handle_fault (struct intr_frame *f, void *addr,
+                     bool user, bool write, bool not_present) {
+	RETURN_VALUE_IF (vm_fault_addr_invalid (addr), false);
+	RETURN_VALUE_IF (!not_present, vm_handle_write_protect_fault (addr, write));
+	return vm_handle_not_present_fault (f, addr, user, write);
+}
+// fault 주소가 NULL이거나 커널 영역이면 복구할 수 없는 fault로 판단
+static bool
+vm_fault_addr_invalid (void *addr) {
+	return addr == NULL || is_kernel_vaddr (addr);
+}
 
-  if (addr == NULL || !is_user_vaddr (addr) || not_present == false)
-    {
-      return false;
-    }
+/* 페이지가 아직 매핑되지 않은 fault를 처리한다. */
+static bool
+vm_handle_not_present_fault (struct intr_frame *f, void *addr,
+                             bool user, bool write) {
+	RETURN_VALUE_IF (vm_claim_spt_page (addr, write), true);
+	RETURN_VALUE_IF (!vm_should_grow_stack (f, addr, user), false);
+	return vm_grow_stack_and_claim (addr);
+}
 
-  void *pg_addr = pg_round_down (addr);
+// SPT에 등록된 page가 있으면 실제 프레임 매핑
+static bool
+vm_claim_spt_page (void *addr, bool write) {
+	struct supplemental_page_table *spt = &thread_current ()->spt;
+	struct page *page = spt_find_page (spt, addr);
 
-  page = spt_find_page (spt, pg_addr);
-  if (page != NULL)
-    {
-      if (page->frame != NULL)
-        return true;
-      return vm_do_claim_page (page);
-    }
-  if (addr >= rsp - 8 && addr > USER_STACK - (1 << 20) && addr < USER_STACK)
-    {
-      vm_stack_growth (addr);
-      return true;
-    }
-  return false;
+	// SPT에 page가 없거나, write 요청이 있고 page가 writable이 아니면 실패
+	RETURN_VALUE_IF (page == NULL, false);
+	RETURN_VALUE_IF (write && !page->writable, vm_handle_unwritable_spt_page (page));
+
+	// page 맵핑
+	return vm_do_claim_page (page);
+}
+
+// SPT page는 찾았지만 쓰기 권한을 허용할 수 없는 fault 처리
+static bool
+vm_handle_unwritable_spt_page (struct page *page UNUSED) {
+	/* TODO: copy-on-write를 구현하면 여기서 처리한다. */
+	return false;
+}
+
+// addr가 정상적인 스택 성장인지 판단
+static bool
+vm_should_grow_stack (struct intr_frame *f, void *addr, bool user) {
+	RETURN_VALUE_IF (addr == NULL, false);
+	RETURN_VALUE_IF (user && f == NULL, false);
+
+	struct thread *curr = thread_current ();
+	RETURN_VALUE_IF (!user && curr == NULL, false);
+
+	uintptr_t fault_addr = (uintptr_t) addr;
+	uintptr_t rsp = user ? (uintptr_t) f->rsp : (uintptr_t) curr->user_rsp;
+
+	RETURN_VALUE_IF (rsp < 32, false);
+
+	return fault_addr < (uintptr_t) USER_STACK &&
+	       fault_addr >= (uintptr_t) (USER_STACK - STACK_MAX) &&
+	       fault_addr >= rsp - 32;
+}
+
+/* 스택 페이지를 만들고 즉시 claim한다. */
+static bool
+vm_grow_stack_and_claim (void *addr) {
+	/* TODO: vm_stack_growth()에서 pg_round_down(addr)에 VM_ANON 스택
+	 * 페이지를 SPT에 추가하게 만든 뒤 claim한다. */
+	vm_stack_growth (addr);
+	return vm_claim_page (pg_round_down (addr));
+}
+
+/* 이미 존재하는 페이지의 권한 위반 fault를 처리한다. */
+static bool
+vm_handle_write_protect_fault (void *addr, bool write) {
+	struct supplemental_page_table *spt = &thread_current ()->spt;
+	struct page *page = spt_find_page (spt, addr);
+	RETURN_VALUE_IF (!write, false);
+	RETURN_VALUE_IF (page == NULL, false);
+
+	return vm_handle_wp (page);
 }
 
 /* Free the page.

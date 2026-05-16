@@ -1382,27 +1382,27 @@ lazy_load_segment (struct page *page, void *aux) {
 
 	//  2. page에서 frame을 찾습니다.
 	void* kva = page->frame->kva;
-	off_t file_read_bytes;
 
-	//  3. 파일에서 page_read_bytes만큼 읽습니다.  파일의 offset 위치부터 page_read_bytes만큼 읽어서, 메모리의 kva 주소부터 page_read_bytes만큼 채운다.
-	if (lazy_aux->page_read_bytes > 0) 
-		file_read_bytes = file_read_at(lazy_aux->file,kva, lazy_aux->page_read_bytes, lazy_aux->ofs);	
-	else {
-		free(lazy_aux);
-		return false; 
+	off_t file_read_bytes = 0;
+
+	if (lazy_aux->page_read_bytes > 0)
+  	file_read_bytes = file_read_at (
+    	  lazy_aux->file,
+      	kva,
+      	lazy_aux->page_read_bytes,
+      	lazy_aux->ofs);
+
+	if (file_read_bytes != (off_t) lazy_aux->page_read_bytes) {
+  	free (lazy_aux);
+  	return false;
 	}
 
-	//  4. 읽은 뒤 남은 부분을 0으로 채웁니다.
-	memset((uint8_t *) kva + lazy_aux->page_read_bytes, 0, lazy_aux->page_zero_bytes);
-	if(file_read_bytes == lazy_aux->page_read_bytes) {
-		free(lazy_aux);
-		return true;
-	}
-	//  5. 성공하면 true를 반환합니다.
-	//  6. 더 이상 필요 없는 aux는 정리해야 합니다.
+	memset ((uint8_t *) kva + lazy_aux->page_read_bytes,
+        0,
+        lazy_aux->page_zero_bytes);
 
-	free(lazy_aux);
-	return false;
+	free (lazy_aux);
+	return true;
 
 }
 
@@ -1457,7 +1457,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 			return false;
 
 		//file 포인터 생명주기 주의?
-		aux->file = file;
+		aux->file = file_reopen(file);
 		aux->ofs = ofs;
 		aux->page_read_bytes = page_read_bytes;
 		aux->page_zero_bytes = page_zero_bytes;
@@ -1481,17 +1481,18 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* USER_STACK에 스택용 PAGE를 만든다. 성공하면 true를 반환한다. */
 static bool
 setup_stack (struct intr_frame *if_) {
-	struct thread *curr = thread_current ();
-	bool success = false;
-	void *stack_bottom = (void *) (((uint8_t *) USER_STACK) - PGSIZE);
+  struct thread *curr = thread_current ();
+  void *stack_bottom = (void *) (((uint8_t *) USER_STACK) - PGSIZE);
 
-	curr->stack_bottom = stack_bottom;
-	vm_alloc_page(VM_ANON | VM_MARKER_0, stack_bottom, true);
-	if (vm_claim_page(stack_bottom)) {
-		if_->rsp = USER_STACK;
-		success = true;
-	}
-	
-	return success;
+  curr->stack_bottom = stack_bottom;
+
+  if (!vm_alloc_page (VM_ANON | VM_MARKER_0, stack_bottom, true))
+    return false;
+
+  if (!vm_claim_page (stack_bottom))
+    return false;
+
+  if_->rsp = USER_STACK;
+  return true;
 }
 #endif /* VM */
