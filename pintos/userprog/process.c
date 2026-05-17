@@ -1298,49 +1298,31 @@ install_page (void *upage, void *kpage, bool writable) {
  */
 
 static bool
-lazy_load_segment (struct page *page, void *aux) {
-	ASSERT(page != NULL);
-	ASSERT(page->frame != NULL);
-	ASSERT(page->frame->kva != NULL);
-	/*
+lazy_load_segment (struct page *page, void *aux_) {
+	struct lazy_load_arg *aux = aux_;
+	uint8_t *kva = page->frame->kva;
+	bool success = false;
 
-	 * TODO: 파일에서 세그먼트를 로드하라.
-	 */
-	/*
-	 * TODO: 이 함수는 VA 주소에서 첫 번째 페이지 폴트가 발생했을 때 호출된다.
-	 */
-	/*
-	 * TODO: 이 함수를 호출할 때 VA를 사용할 수 있다.
-	 */
-	//  1 .aux에서 로딩 정보를 꺼냅니다.
-	struct lazy_load_arg *lazy_aux = aux;
-	ASSERT(aux != NULL);
-	ASSERT(lazy_aux->file != NULL);
+	if (aux == NULL || aux->file == NULL)
+		goto done;
 
-	//  2. page에서 frame을 찾습니다.
-	void* kva = page->frame->kva;
-
-	off_t file_read_bytes = 0;
-
-	if (lazy_aux->page_read_bytes > 0)
-  	file_read_bytes = file_read_at (
-    	  lazy_aux->file,
-      	kva,
-      	lazy_aux->page_read_bytes,
-      	lazy_aux->ofs);
-
-	if (file_read_bytes != (off_t) lazy_aux->page_read_bytes) {
-  	free (lazy_aux);
-  	return false;
+	lock_acquire (&filesys_lock);
+	if (file_read_at (aux->file, kva, aux->page_read_bytes, aux->ofs) == (off_t) aux->page_read_bytes) {
+		memset (kva + aux->page_read_bytes, 0, aux->page_zero_bytes);
+		success = true;
 	}
+	lock_release (&filesys_lock);
 
-	memset ((uint8_t *) kva + lazy_aux->page_read_bytes,
-        0,
-        lazy_aux->page_zero_bytes);
-
-	free (lazy_aux);
-	return true;
-
+done:
+	if (aux != NULL) {
+		if (aux->file != NULL) {
+			lock_acquire (&filesys_lock);
+			file_close (aux->file);
+			lock_release (&filesys_lock);
+		}
+		free (aux);
+	}
+	return success;
 }
 
 /*
@@ -1362,11 +1344,8 @@ static bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
               uint32_t read_bytes, uint32_t zero_bytes, bool writable) {
 	
-	// 1. 전체 read_bytes + zero_bytes가 page 크기 단위인지 검사
 	ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0); 
-	// 2. upage가 page-aligned인지 검사
 	ASSERT (pg_ofs (upage) == 0);
-	// 3. file offset이 page-aligned인지 검사
 	ASSERT (ofs % PGSIZE == 0);
 
 	while (read_bytes > 0 || zero_bytes > 0) {
@@ -1378,29 +1357,21 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 		size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
 		size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-		/*
-		 * TODO: lazy_load_segment에 정보를 전달할 aux를 설정하라.
-		 aux 구조체 정의 aux안에 들어가는 정보(file, offset, page_read_bytes, page_zero_bytes)
-
-		 1. lazy_load_segment에 건네줄 aux를 동적 할당한다. 
-		 2. aux 를 선언해 준다. 
-		 3. aux 에 넣어준다. 
-
-		 나중에 aux 값 꺼낼때 lazy_load_args 타입으로 해야함
-		 */	
-
 		struct lazy_load_arg * aux = malloc(sizeof *aux);
-		if (aux == NULL)
-			return false;
+		RETURN_VALUE_IF (aux == NULL, false);
 
-		//file 포인터 생명주기 주의?
 		aux->file = file_reopen(file);
+		if (aux->file == NULL) {
+			free (aux);
+			return false;
+		}
 		aux->ofs = ofs;
 		aux->page_read_bytes = page_read_bytes;
 		aux->page_zero_bytes = page_zero_bytes;
 		
 		if (!vm_alloc_page_with_initializer (VM_ANON, upage, writable,
 		                                     lazy_load_segment, aux)) {
+			file_close (aux->file);
 			free(aux);
 			return false;																		
 			}	
@@ -1418,18 +1389,18 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* USER_STACK에 스택용 PAGE를 만든다. 성공하면 true를 반환한다. */
 static bool
 setup_stack (struct intr_frame *if_) {
-  struct thread *curr = thread_current ();
-  void *stack_bottom = (void *) (((uint8_t *) USER_STACK) - PGSIZE);
+	struct thread *curr = thread_current ();
+	void *stack_bottom = (void *) (((uint8_t *) USER_STACK) - PGSIZE);
 
-  curr->stack_bottom = stack_bottom;
+	RETURN_VALUE_IF (if_ == NULL, false);
+	RETURN_VALUE_IF (curr == NULL, false);
 
-  if (!vm_alloc_page (VM_ANON | VM_MARKER_0, stack_bottom, true))
-    return false;
+	curr->stack_bottom = stack_bottom;
+	RETURN_VALUE_IF (!vm_alloc_page (VM_ANON | VM_MARKER_0, stack_bottom, true), false);
+	RETURN_VALUE_IF (!vm_claim_page (stack_bottom), false);
 
-  if (!vm_claim_page (stack_bottom))
-    return false;
+	if_->rsp = USER_STACK;
 
-  if_->rsp = USER_STACK;
-  return true;
+	return true;
 }
 #endif /* VM */
