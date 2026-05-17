@@ -865,6 +865,17 @@ static bool validate_segment (const struct Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
+static bool setup_process_address_space (struct thread *t);
+static char *copy_command_line (const char *file_name);
+static bool parse_command_line (char *command, char **argv, int *argc,
+                                size_t argv_cap);
+static struct file *open_executable (const char *program_name);
+static bool read_elf_header (struct file *file, struct ELF *ehdr);
+static bool load_program_headers (struct file *file, const struct ELF *ehdr);
+static bool load_loadable_segment (struct file *file,
+                                   const struct Phdr *phdr);
+static bool setup_initial_stack (struct intr_frame *if_, char **argv,
+                                 int argc);
 
 /* PHDR이 유효한 로드 가능한 세그먼트인지 확인하고 true를 반환한다. */
 static bool
@@ -901,6 +912,190 @@ validate_segment (const struct Phdr *phdr, struct file *file) {
 	return true;
 }
 
+static bool
+setup_process_address_space (struct thread *t) {
+	t->pml4 = pml4_create ();
+	RETURN_VALUE_IF (t->pml4 == NULL, false);
+
+	process_activate (t);
+	return true;
+}
+
+static char *
+copy_command_line (const char *file_name) {
+	RETURN_VALUE_IF (file_name == NULL, NULL);
+
+	char *copy = palloc_get_page (0);
+
+	RETURN_VALUE_IF (copy == NULL, NULL);
+
+	strlcpy (copy, file_name, PGSIZE);
+	return copy;
+}
+
+static bool
+parse_command_line (char *command, char **argv, int *argc, size_t argv_cap) {
+	char *token;
+	char *save_point;
+
+	RETURN_VALUE_IF (command == NULL || argv == NULL || argc == NULL, false);
+
+	*argc = 0;
+	for (token = strtok_r (command, " ", &save_point); token != NULL;
+	     token = strtok_r (NULL, " ", &save_point)) {
+		if ((size_t) *argc >= argv_cap)
+			return false;
+		argv[(*argc)++] = token;
+	}
+	return *argc > 0;
+}
+
+static struct file *
+open_executable (const char *program_name) {
+	struct file *file;
+
+	lock_acquire (&filesys_lock);
+	file = filesys_open (program_name);
+	if (file != NULL)
+		file_deny_write (file);
+	lock_release (&filesys_lock);
+
+	return file;
+}
+
+static bool
+read_elf_header (struct file *file, struct ELF *ehdr) {
+	bool read_success;
+
+	lock_acquire (&filesys_lock);
+	read_success = file_read (file, ehdr, sizeof *ehdr) == sizeof *ehdr;
+	lock_release (&filesys_lock);
+
+	return read_success &&
+	       memcmp (ehdr->e_ident, "\177ELF\2\1\1", 7) == 0 &&
+	       ehdr->e_type == 2 &&
+	       ehdr->e_machine == 0x3E &&
+	       ehdr->e_version == 1 &&
+	       ehdr->e_phentsize == sizeof (struct Phdr) &&
+	       ehdr->e_phnum <= 1024;
+}
+
+static bool
+read_program_header (struct file *file, off_t file_ofs, struct Phdr *phdr) {
+	off_t length;
+	bool read_success;
+
+	lock_acquire (&filesys_lock);
+	length = file_length (file);
+	lock_release (&filesys_lock);
+	if (file_ofs < 0 || file_ofs > length)
+		return false;
+
+	lock_acquire (&filesys_lock);
+	file_seek (file, file_ofs);
+	read_success = file_read (file, phdr, sizeof *phdr) == sizeof *phdr;
+	lock_release (&filesys_lock);
+
+	return read_success;
+}
+
+static bool
+load_loadable_segment (struct file *file, const struct Phdr *phdr) {
+	bool writable;
+	uint64_t file_page;
+	uint64_t mem_page;
+	uint64_t page_offset;
+	uint32_t read_bytes;
+	uint32_t zero_bytes;
+
+	if (!validate_segment (phdr, file))
+		return false;
+
+	writable = (phdr->p_flags & PF_W) != 0;
+	file_page = phdr->p_offset & ~PGMASK;
+	mem_page = phdr->p_vaddr & ~PGMASK;
+	page_offset = phdr->p_vaddr & PGMASK;
+
+	if (phdr->p_filesz > 0) {
+		read_bytes = page_offset + phdr->p_filesz;
+		zero_bytes = ROUND_UP (page_offset + phdr->p_memsz, PGSIZE) -
+		             read_bytes;
+	} else {
+		read_bytes = 0;
+		zero_bytes = ROUND_UP (page_offset + phdr->p_memsz, PGSIZE);
+	}
+
+	return load_segment (file, file_page, (void *) mem_page, read_bytes,
+	                     zero_bytes, writable);
+}
+
+static bool
+load_program_headers (struct file *file, const struct ELF *ehdr) {
+	off_t file_ofs = ehdr->e_phoff;
+
+	for (int i = 0; i < ehdr->e_phnum; i++) {
+		struct Phdr phdr;
+
+		if (!read_program_header (file, file_ofs, &phdr))
+			return false;
+		file_ofs += sizeof phdr;
+
+		switch (phdr.p_type) {
+		case PT_NULL:
+		case PT_NOTE:
+		case PT_PHDR:
+		case PT_STACK:
+		default:
+			break;
+		case PT_DYNAMIC:
+		case PT_INTERP:
+		case PT_SHLIB:
+			return false;
+		case PT_LOAD:
+			if (!load_loadable_segment (file, &phdr))
+				return false;
+			break;
+		}
+	}
+	return true;
+}
+
+static bool
+setup_initial_stack (struct intr_frame *if_, char **argv, int argc) {
+	char *stack_p;
+
+	if (!setup_stack (if_))
+		return false;
+
+	stack_p = (char *) if_->rsp;
+	for (int argi = argc - 1; argi >= 0; argi--) {
+		int size = CSTR_SIZE (argv[argi]);
+		stack_p -= size;
+		memcpy (stack_p, argv[argi], size);
+		argv[argi] = stack_p;
+	}
+
+	stack_p = (char *) ((uintptr_t) stack_p & -8);
+	stack_p -= sizeof (uintptr_t);
+	memset (stack_p, 0, sizeof (uintptr_t));
+
+	for (int n = argc - 1; n >= 0; n--) {
+		stack_p -= sizeof (uintptr_t);
+		*(uintptr_t *) stack_p = (uintptr_t) argv[n];
+	}
+
+	if_->R.rsi = (uint64_t) stack_p;
+	if_->R.rdi = argc;
+
+	stack_p -= sizeof (uintptr_t);
+	memset (stack_p, 0, sizeof (uintptr_t));
+	if_->rsp = (uintptr_t) stack_p;
+#ifdef VM
+	thread_current ()->user_rsp = if_->rsp;
+#endif
+	return true;
+}
+
 /*
  * FILE_NAME의 ELF 실행 파일을 현재 스레드에 로드한다.
  * 실행 파일의 진입점을 *RIP에 저장하고,
@@ -915,303 +1110,45 @@ load (const char *file_name, struct intr_frame *if_) {
 	 */
 	struct ELF ehdr;
 	struct file *file = NULL;
-	off_t file_ofs;
 	bool success = false;
-	int i;
 	char *argv[64];
-	char *token, *save_point;
 	char *fn_copy = NULL;
 	int argc = 0;
-
-	/*
-	 * 페이지 디렉터리를 할당하고 활성화한다.
-	 */
-	/*
-	 * 커널 주소 공간 매핑이 포함된 현재 프로세스용 페이지 테이블 생성
-	 * 생성한 페이지 테이블을 현재 CPU에 반영
-	 */
-	t->pml4 = pml4_create ();
-	if (t->pml4 == NULL)
+	
+	if(!setup_process_address_space (t))
 		goto done;
-	process_activate (t);
 
-	fn_copy = palloc_get_page (0);
+	fn_copy = copy_command_line (file_name);
+
 	if (fn_copy == NULL)
-		return false;
-	memcpy (fn_copy, file_name, CSTR_SIZE (file_name));
-
-	/*
-	 * 원본 문자열을 잘라가며 토큰 생성
-	 */
-	token = strtok_r (fn_copy, " ", &save_point);
-	while (token != NULL) {
-		if ((size_t) argc >= sizeof argv / sizeof *argv)
-			goto done;
-		argv[argc++] = token;
-		token = strtok_r (NULL, " ", &save_point);
-	}
-
-	if (argc == 0)
 		goto done;
 
-	/*
-	 * 실행 파일을 연다.
-	 */
-	lock_acquire (&filesys_lock);
-	file = filesys_open (argv[0]);
-	if (file != NULL)
-		file_deny_write (file);
-	lock_release (&filesys_lock);
+	if(!parse_command_line (fn_copy, argv, &argc, sizeof argv / sizeof *argv))
+		goto done;
 
+	file = open_executable (argv[0]);
+	
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
 
-	/*
-	 * 실행 파일 헤더를 읽고 검증한다.
-	 */
-	/*
-	 * e_ident    : ELF 파일 여부, 64비트 여부, 엔디안 정보
-	 *              \177ELF = ELF 매직 값
-	 *              \2      = 64비트 ELF
-	 *              \1      = little-endian
-	 *              \1      = ELF 버전 1
-	 * e_type     : 파일 종류, 2 = 실행 파일
-	 *              1 = relocatable, 2 = executable, 3 = shared object
-	 * e_machine  : 대상 CPU 종류, 0x3E = x86-64
-	 * e_version  : ELF 버전, 1 = 현재 버전
-	 * e_phentsize: 프로그램 헤더 1개의 크기
-	 * e_phnum    : 프로그램 헤더 개수, 너무 크면 비정상 파일로 간주
-	 */
-	lock_acquire (&filesys_lock);
-	bool ehdr_read_success = file_read (file, &ehdr, sizeof ehdr) == sizeof ehdr;
-	lock_release (&filesys_lock);
-
-	if (!ehdr_read_success ||
-	    memcmp (ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 ||
-	    ehdr.e_machine != 0x3E || ehdr.e_version != 1 ||
-	    ehdr.e_phentsize != sizeof (struct Phdr) || ehdr.e_phnum > 1024) {
+	if (!read_elf_header (file, &ehdr)) {
 		printf ("load: %s: error loading executable\n", file_name);
 		goto done;
 	}
 
-	/*
-	 * 프로그램 헤더들을 읽는다.
-	 */
-	/*
-	 * e_phoff : 파일 시작 기준 프로그램 헤더 표 시작 위치
-	 * e_phnum : 프로그램 헤더 개수
-	 *
-	 * 프로그램 헤더 1개는
-	 * "파일의 어느 구역을 메모리 어디에 어떤 권한으로 올릴지"를 설명한다.
-	 */
-	file_ofs = ehdr.e_phoff;
-	for (i = 0; i < ehdr.e_phnum; i++) {
-		struct Phdr phdr;
-
-		/*
-		 * file_ofs 범위 검사
-		 * file_seek 이후의 file_read는 file_ofs 위치부터 읽는다.
-		 */
-		lock_acquire (&filesys_lock);
-		off_t length = file_length (file);
-		lock_release (&filesys_lock);
-
-		if (file_ofs < 0 || file_ofs > length)
-			goto done;
-
-		lock_acquire (&filesys_lock);
-		file_seek (file, file_ofs);
-
-		/*
-		 * 현재 프로그램 헤더 1개를 읽고 다음 헤더 위치로 이동
-		 */
-		bool phdr_read_success = file_read (file, &phdr, sizeof phdr) == sizeof phdr;
-		lock_release (&filesys_lock);
-		if (!phdr_read_success)
-			goto done;
-		file_ofs += sizeof phdr;
-
-		/*
-		 * PT_LOAD   : 실제 메모리에 올릴 파일 구역
-		 * PT_NULL   : 비어 있는 항목
-		 * PT_NOTE   : 부가 정보
-		 * PT_PHDR   : 프로그램 헤더 표 자체 설명
-		 * PT_STACK  : 스택 관련 정보
-		 * PT_DYNAMIC, PT_INTERP, PT_SHLIB : 현재 로더에서 지원하지 않음
-		 */
-		switch (phdr.p_type) {
-		case PT_NULL:
-		case PT_NOTE:
-		case PT_PHDR:
-		case PT_STACK:
-		default:
-			/*
-			 * 이 세그먼트는 무시한다.
-			 */
-			break;
-		case PT_DYNAMIC:
-		case PT_INTERP:
-		case PT_SHLIB:
-			goto done;
-		case PT_LOAD:
-			/*
-			 * validate_segment : 이 구역을 실제로 적재 가능한지 검사
-			 * p_flags          : 쓰기 가능 여부 확인
-			 * p_offset         : 파일 안에서 이 구역이 시작하는 위치
-			 * p_vaddr          : 메모리에서 이 구역이 올라갈 가상 주소
-			 *
-			 * file_page   : 파일 쪽 페이지 시작 주소
-			 * mem_page    : 메모리 쪽 페이지 시작 주소
-			 * page_offset : 첫 페이지 안에서 실제 데이터가 시작하는 위치
-			 */
-			if (validate_segment (&phdr, file)) {
-				bool writable = (phdr.p_flags & PF_W) != 0;
-				uint64_t file_page = phdr.p_offset & ~PGMASK;
-				uint64_t mem_page = phdr.p_vaddr & ~PGMASK;
-				uint64_t page_offset = phdr.p_vaddr & PGMASK;
-				uint32_t read_bytes, zero_bytes;
-
-				/*
-				 * p_filesz > 0
-				 * 파일에 실제 데이터가 있는 구역
-				 * 처음 부분은 디스크에서 읽고 남는 메모리 공간은 0으로 채움
-				 *
-				 * p_filesz == 0
-				 * 파일에는 데이터가 없고 메모리만 필요한 구역
-				 * 예: BSS
-				 * 전부 0으로 채움
-				 */
-				if (phdr.p_filesz > 0) {
-					/*
-					 * 일반 세그먼트.
-					 * 처음 부분은 디스크에서 읽고 나머지는 0으로 채운다.
-					 */
-					read_bytes = page_offset + phdr.p_filesz;
-					zero_bytes =
-					        (ROUND_UP (page_offset + phdr.p_memsz, PGSIZE) -
-					         read_bytes);
-				} else {
-					/*
-					 * 전부 0인 세그먼트.
-					 * 디스크에서 아무것도 읽지 않는다.
-					 */
-					read_bytes = 0;
-					zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
-				}
-
-				/*
-				 * file_page부터 read_bytes만큼 읽고
-				 * 나머지 zero_bytes는 0으로 채운 페이지를 매핑
-				 */
-				if (!load_segment (file, file_page, (void *) mem_page,
-				                   read_bytes, zero_bytes, writable))
-					goto done;
-			} else
-				goto done;
-			break;
-		}
-	}
-
-	/*
-	 * 스택을 설정한다.
-	 */
-	if (!setup_stack (if_))
+	if (!load_program_headers (file, &ehdr))
+		goto done;
+	
+	if(!setup_initial_stack (if_, argv, argc))
 		goto done;
 
-	char *stack_p = (char *) if_->rsp;
-
-	/*
-	 * 시작 주소.
-	 */
 	if_->rip = ehdr.e_entry;
-
-	/*
-	 * 스택의 아래 방향 성장
-	 * 마지막 인자부터 역순 복사
-	 *
-	 * 예:
-	 * argv[0] = "echo"
-	 * argv[1] = "x"
-	 * argv[2] = "y"
-	 *
-	 * 복사 순서:
-	 * "y" -> "x" -> "echo"
-	 *
-	 * 복사 후:
-	 * argv[0] = 유저 스택 안 "echo" 시작 주소
-	 * argv[1] = 유저 스택 안 "x" 시작 주소
-	 * argv[2] = 유저 스택 안 "y" 시작 주소
-	 */
-	for (int argi = argc - 1; argi >= 0; argi--) {
-		int size = CSTR_SIZE (argv[argi]);
-		stack_p -= size;
-		memcpy (stack_p, argv[argi], size);
-		argv[argi] = stack_p;
-	}
-
-	/*
-	 * 예:
-	 * stack_p = 0x...f7 -> 0x...f0
-	 * 이후 적재 값의 8바이트 포인터 단위
-	 */
-	stack_p = (char *) ((uintptr_t) stack_p & -8);
-
-	/*
-	 * argv[argc] = NULL 자리
-	 */
-	stack_p -= 8;
-	memset (stack_p, 0, 8);
-	/*
-	 * 문자열 포인터 배열의 끝 표시
-	 *
-	 * 예:
-	 * argv[0] = "echo"
-	 * argv[1] = "x"
-	 * argv[2] = "y"
-	 * argv[3] = NULL
-	 */
-
-	/*
-	 * 앞 단계의 argv[i] = 유저 스택 안 문자열 주소
-	 * 해당 주소값들의 8바이트 단위 재적재
-	 *
-	 * 예:
-	 * argv[0] = 0x473ff7 -> "echo"
-	 * argv[1] = 0x473ffc -> "x"
-	 * argv[2] = 0x473ffe -> "y"
-	 *
-	 * 스택 기록 값:
-	 * [0x473ff7] [0x473ffc] [0x473ffe] [NULL]
-	 */
-	for (int n = argc - 1; n >= 0; n--) {
-		stack_p -= 8;
-		*(uintptr_t *) stack_p = (uintptr_t) argv[n];
-	}
-
-	/*
-	 * rdi : argc
-	 * rsi : argv 배열 시작 주소
-	 */
-	if_->R.rsi = (uint64_t) stack_p;
-	if_->R.rdi = argc;
-
-	stack_p -= 8;
-	memset (stack_p, 0, 8);
-	if_->rsp = (uintptr_t) stack_p;
-	/*
-	 * if_->rsp = 유저 프로그램 시작 시 사용할 스택 포인터
-	 */
-
-	// hex_dump(if_->rsp, if_->rsp, USER_STACK - (uint64_t)if_->rsp, true);
 	success = true;
 
+
 done:
-	/*
-	 * load의 성공 여부와 관계없이 여기로 도착
-	 * 메모리 해제 진행
-	 */
 	if (fn_copy != NULL)
 		palloc_free_page (fn_copy);
 
