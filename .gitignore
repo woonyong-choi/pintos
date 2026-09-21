@@ -57,3 +57,12 @@ cmake-build-debug/
 
 # Annotation (auto-generated)
 .annotation/
+
+# AI 작업 중간 산출물·임시 파일·작업 로그
+.local/
+*handoff*.md
+scratch*
+tmp*
+notes/ai-*
+*.bak
+*-staging/
