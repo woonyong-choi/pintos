@@ -1,4 +1,4 @@
-# 🐧 lrn-pintos — 스레드 스케줄링과 가상 메모리를 구현한 교육용 커널
+# lrn-pintos — 스레드 스케줄링과 가상 메모리를 구현한 교육용 커널
 
 KAIST PintOS x86-64 골격 위에 **우선순위 스케줄링·priority donation·MLFQS·시스템 콜·demand paging·Copy-on-Write fork**를 직접 구현한 커널입니다. "스레드가 어떤 순서로 실행되고, 프로세스가 메모리를 어떻게 나눠 쓰고 되돌려주는가"를 코드로 확인하려고 만들었습니다.
 

@@ -325,8 +325,8 @@ graph TD
 
 | 파일 | Alarm | Priority | Donation | MLFQS |
 |------|:-----:|:--------:|:--------:|:-----:|
-| `include/threads/thread.h` | ✅ | ✅ | ✅ | ✅ |
-| `threads/thread.c` | ✅ | ✅ | ✅ | ✅ |
-| `devices/timer.c` | ✅ | | | ✅ |
-| `threads/synch.c` | | ✅ | ✅ | |
-| `threads/fixed_point.h` (신규) | | | | ✅ |
+| `include/threads/thread.h` | O | O | O | O |
+| `threads/thread.c` | O | O | O | O |
+| `devices/timer.c` | O | | | O |
+| `threads/synch.c` | | O | O | |
+| `threads/fixed_point.h` (신규) | | | | O |
