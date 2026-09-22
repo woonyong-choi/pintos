@@ -2,7 +2,7 @@
 
 스레드의 실행 순서와 프로세스의 메모리 공유·회수를 구현한 교육용 커널입니다. KAIST PintOS x86-64 위에 우선순위 스케줄링, 시스템 콜, 가상 메모리와 Copy-on-Write fork를 구현합니다.
 
-[PintOS Wiki](https://docs.woonyong.com/wiki/pintos/) · [단계별 구현 기록](docs/pintos/) · [CI](https://github.com/woonyong-kr/lrn-pintos/actions)
+[PintOS Wiki](https://docs.woonyong.com/wiki/pintos/) · [단계별 구현 기록](docs/pintos/) · [CI](https://github.com/woonyong-choi/lrn-pintos/actions)
 
 [크래프톤 정글 팀 프로젝트](https://github.com/Jungle-12-303/wk11_7)에서 이어서 작업하는 개인 저장소입니다. 기반 커널·테스트는 과제 제공물이며 팀 구현과 개인 변경은 커밋 저자·파일별 diff로 구분합니다.
 
