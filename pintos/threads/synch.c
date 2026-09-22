@@ -28,6 +28,10 @@
 #include "threads/thread.h"
 
 /* 보조 함수 선언부. */
+/* 중첩 기부를 따라 올라갈 최대 깊이. lock 대기 그래프의 사이클에서
+   순회가 끝나지 않는 것을 막는다. */
+#define NESTED_DONATION_DEPTH_MAX 7
+
 static bool cmp_sema_priority(const struct list_elem *a, const struct list_elem *b, void *aux);
 bool thread_priority_donation_elem(const struct list_elem *a,
                                    const struct list_elem *b, void *aux);
@@ -203,46 +207,46 @@ lock_acquire (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
-	/* 여기서 priority donation 해야 할 듯? */
-	struct thread *curr = thread_current();
 
-	/* 나(curr)를 lock하는 holder 스레드가 존재한다면? */
-	if(!thread_mlfqs && lock->holder != NULL){
+	struct thread *curr = thread_current ();
+
+	/* MLFQS는 우선순위를 수식으로 계산하므로 기부가 그 값을 덮어쓰면 안 된다. */
+	if (!thread_mlfqs && lock->holder != NULL) {
 		struct thread *holder = lock->holder;
-		int idx = 0;
-		
-		/* holder의 donation_list에 추가하기: 내림차순 */
-		list_insert_ordered(&holder->donation_list, &curr->donation_elem,
-		                    thread_priority_donation_elem, NULL);
-		/* 내가 누구에 의해 lock 되었는지 명시하기 */
+
+		list_insert_ordered (&holder->donation_list, &curr->donation_elem,
+		                     thread_priority_donation_elem, NULL);
 		curr->waiting_lock = lock;
-		
-		/* 만약 lock 소유 스레드의 priority가 낮다면? => 기부 */
-		if(holder->priority < curr->priority){
-			holder->priority = curr->priority;
-		}
 
-		/* 일단 임시로 여기에 중첩 기부를 넣기로... */
-		while(idx < 7){
+		/*
+		 * holder가 실행 중이 아니라 ready_list에 앉아 있을 수도 있다.
+		 * 그때는 priority만 올리면 큐 순서가 깨져 스케줄러가 계속 더 낮은
+		 * 스레드를 고른다(tests/threads/priority-donate-ready).
+		 * thread_set_effective_priority()가 위치까지 옮긴다.
+		 */
+		if (holder->priority < curr->priority)
+			thread_set_effective_priority (holder, curr->priority);
+
+		/*
+		 * 중첩 기부: holder가 또 다른 lock을 기다리면 그 소유자에게도
+		 * 전파한다. lock 대기 그래프에 사이클(= 데드락)이 있으면 이 순회가
+		 * 끝나지 않으므로 깊이를 막아 둔다. 과제 테스트의 최대 체인 길이는
+		 * priority-donate-chain의 8단계다.
+		 */
+		for (int depth = 0; depth < NESTED_DONATION_DEPTH_MAX; depth++) {
 			struct lock *next_lock = holder->waiting_lock;
-			if(next_lock == NULL) break;
-			holder = next_lock->holder;
-			
-			if(holder == NULL) break;
-			/* 여기서 holder는 상위의 thread */
-			if( holder->priority < curr->priority){
-				holder->priority = curr->priority;
-			}
+			if (next_lock == NULL || next_lock->holder == NULL)
+				break;
 
-			idx++;
+			holder = next_lock->holder;
+			if (holder->priority < curr->priority)
+				thread_set_effective_priority (holder, curr->priority);
 		}
 	}
 
-	/* 단순히 sema_val을 낮출 뿐만 아니라, lock 획득을 위한 대기함(wait에 넣기) */
 	sema_down (&lock->semaphore);
-	/* 여기선 락을 획득했으니까, waiting_lock을 null 처리 */
 	curr->waiting_lock = NULL;
-	lock->holder = thread_current ();
+	lock->holder = curr;
 }
 
 /*

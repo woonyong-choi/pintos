@@ -32,6 +32,12 @@
 /*
  * THREAD_READY 상태의 프로세스 리스트.
  * 즉, 실행할 준비는 되었지만 실제로 실행 중은 아닌 프로세스들이다.
+ *
+ * 불변식: 항상 priority 내림차순으로 정렬돼 있다.
+ * next_thread_to_run()이 뒤를 훑지 않고 front만 pop하므로, 이 순서가 곧
+ * 스케줄링 결정이다. 따라서 이미 큐에 들어 있는 스레드의 priority를 바꾸는
+ * 쪽(priority donation)은 값만 덮어쓰면 안 되고 위치까지 옮겨야 한다 —
+ * thread_set_effective_priority()가 그 책임을 혼자 진다.
  */
 static struct list ready_list;
 
@@ -126,10 +132,6 @@ static void mlfqs_update_recent_cpu (struct thread *t);
 static void mlfqs_update_priority (struct thread *t);
 static void mlfqs_update_all_recent_cpu (void);
 static void mlfqs_update_all_priorities (void);
-
-/* list_push_ordered, cmp_priority를 제거하고
- * list_insert_ordered + thread_priority로 통일했다.
- */
 
 /*
  * T가 유효한 스레드를 가리키는 것처럼 보이면 true를 반환한다.
@@ -369,7 +371,6 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	// list_push_back (&ready_list, &t->elem);
 	list_insert_ordered (&ready_list, &t->elem, thread_priority, NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
@@ -980,15 +981,43 @@ check_preemption (void) {
 /* donation_list에서 최대 우선순위를 구해 effective priority를 갱신한다. */
 void
 refresh_priority (struct thread *t) {
-	t->priority = t->base_priority;
+	int new_priority = t->base_priority;
 
 	if (!list_empty (&t->donation_list)) {
 		list_sort (&t->donation_list, thread_priority_donation_elem, NULL);
 		struct thread *top = list_entry (list_front (&t->donation_list),
 		                                 struct thread, donation_elem);
-		if (top->priority > t->priority)
-			t->priority = top->priority;
+		if (top->priority > new_priority)
+			new_priority = top->priority;
 	}
+
+	thread_set_effective_priority (t, new_priority);
+}
+
+/*
+ * T의 effective priority를 NEW_PRIORITY로 바꾸고 ready_list 정렬 불변식을
+ * 지킨다.
+ *
+ * T가 ready 상태면 값을 바꾸는 것만으로는 큐 위치가 그대로 남아,
+ * next_thread_to_run()이 더 낮은 우선순위의 front를 계속 고르게 된다.
+ * priority donation은 실행 중이 아닌 lock holder에게도 일어나므로
+ * (tests/threads/priority-donate-ready) 이 경로가 반드시 필요하다.
+ *
+ * MLFQS의 일괄 재계산은 이 함수를 쓰지 않는다. 매 4틱마다 전체 스레드의
+ * 우선순위가 한꺼번에 바뀌므로 개별 재삽입(O(n) x n)보다
+ * thread_tick()의 list_sort() 한 번이 싸다.
+ */
+void
+thread_set_effective_priority (struct thread *t, int new_priority) {
+	enum intr_level old_level = intr_disable ();
+
+	t->priority = new_priority;
+	if (t->status == THREAD_READY) {
+		list_remove (&t->elem);
+		list_insert_ordered (&ready_list, &t->elem, thread_priority, NULL);
+	}
+
+	intr_set_level (old_level);
 }
 
 /* list_insert_ordered용 비교 함수: priority 내림차순 */

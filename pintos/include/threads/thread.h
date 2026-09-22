@@ -207,6 +207,7 @@ void thread_awake (int64_t global_ticks);
 /* phase 2 Priority Scheduling을 위해 추가한 함수 선언이다. */
 void check_preemption (void);
 void refresh_priority (struct thread *t);
+void thread_set_effective_priority (struct thread *t, int new_priority);
 bool thread_priority (const struct list_elem *a, const struct list_elem *b,
                       void *aux);
 bool thread_priority_donation_elem (const struct list_elem *a,
