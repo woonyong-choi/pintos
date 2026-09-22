@@ -85,7 +85,7 @@ QEMU에서 실제로 `make check`를 실행한 화면입니다(threads 테스트
 | 항목 | 내용 |
 |---|---|
 | 원본 팀 저장소 | [Jungle-12-303/wk11_7](https://github.com/Jungle-12-303/wk11_7) |
-| 팀 과제 기간 | 2026-04-23 ~ 2026-05-21 (커밋 `581a1e4` ~ `5c8f52c`) |
+| 팀 과제 기간 | 2026-04-23 ~ 2026-05-21 (커밋 `581a1e4` ~ `7aa964b`) |
 | 팀 구성 | 7인. `main` 에 병합된 기여자는 6인이고, 나머지 1인의 커밋은 병합되지 않은 브랜치에 남아 있다 — `git shortlog -sne --all` 로 확인 |
 | **본인 담당** | **팀 기간 커밋 159/214개(약 74%, `main` 기준)로 최다 기여. threads(alarm·priority·donation)와 userprog·vm 전반.** MLFQS는 팀 기간에 미구현으로 남아 종료 후 개인 작업으로 구현했다 |
 
@@ -93,17 +93,20 @@ QEMU에서 실제로 `make check`를 실행한 화면입니다(threads 테스트
 
 ### 개인 확장 (팀 과제 종료 후)
 
-**커밋 범위: [`e10cec5`](https://github.com/woonyong-choi/lrn-pintos/commit/e10cec5) (2026-08-02) ~ [`d8a194d`](https://github.com/woonyong-choi/lrn-pintos/commit/d8a194d) (2026-09-11), 9개 커밋.** `git log --author` 기준입니다.[^authors]
+**커밋 범위: [`a1ff596`](https://github.com/woonyong-choi/lrn-pintos/commit/a1ff596) (2026-08-02) ~ 현재, 21개 커밋.** `git log --author` 기준입니다.[^authors]
 
 | 무엇이 달라졌나 | 커밋 | 파일 |
 |---|---|---|
-| **MLFQS 구현**(팀 종료 시점에는 TODO 스텁) — 4BSD 규칙, 17.14 고정소수점, 전체 스레드 갱신용 `all_elem` 목록, MLFQS일 때 donation 우회 | [`09df7c8`](https://github.com/woonyong-choi/lrn-pintos/commit/09df7c8) | `thread.c` (+188), `thread.h` (+3), `synch.c` (+9) |
-| **선점 판단 버그 수정** — `thread_create`에서 요청값 대신 실제 `t->priority` 비교. vm 141개 회귀 재검증 | [`ea154f8`](https://github.com/woonyong-choi/lrn-pintos/commit/ea154f8) | `thread.c` |
-| **x86 QEMU CI 도입** — threads·vm job 분리, ubuntu-22.04 + `qemu-system-x86` | [`d84c249`](https://github.com/woonyong-choi/lrn-pintos/commit/d84c249) | `.github/workflows/ci.yml` |
-| 저장소 정리 — 중복 문서 제거, 커널 범위 명확화, 출처·기여 경계 명시 | [`e10cec5`](https://github.com/woonyong-choi/lrn-pintos/commit/e10cec5), [`23e6157`](https://github.com/woonyong-choi/lrn-pintos/commit/23e6157), [`d8a194d`](https://github.com/woonyong-choi/lrn-pintos/commit/d8a194d) | `docs/`, `README.md` |
-| 검증된 기여 수치 정정 | [`5594d46`](https://github.com/woonyong-choi/lrn-pintos/commit/5594d46) | `README.md` |
+| **MLFQS 구현**(팀 종료 시점에는 TODO 스텁) — 4BSD 규칙, 17.14 고정소수점, 전체 스레드 갱신용 `all_elem` 목록, MLFQS일 때 donation 우회 | [`3162890`](https://github.com/woonyong-choi/lrn-pintos/commit/3162890) | `thread.c` (+188), `thread.h` (+3), `synch.c` (+9) |
+| **선점 판단 버그 수정** — `thread_create`에서 요청값 대신 실제 `t->priority` 비교. vm 141개 회귀 재검증 | [`b38cc90`](https://github.com/woonyong-choi/lrn-pintos/commit/b38cc90) | `thread.c` |
+| **x86 QEMU CI 도입** — threads·vm job 분리, ubuntu-22.04 + `qemu-system-x86` | [`7db77ff`](https://github.com/woonyong-choi/lrn-pintos/commit/7db77ff) | `.github/workflows/ci.yml` |
+| 저장소 정리 — 중복 문서 제거, 커널 범위 명확화, 출처·기여 경계 명시 | [`a1ff596`](https://github.com/woonyong-choi/lrn-pintos/commit/a1ff596), [`81d907b`](https://github.com/woonyong-choi/lrn-pintos/commit/81d907b), [`7286e4c`](https://github.com/woonyong-choi/lrn-pintos/commit/7286e4c) | `docs/`, `README.md` |
+| 검증된 기여 수치 정정 | [`31e6d75`](https://github.com/woonyong-choi/lrn-pintos/commit/31e6d75) | `README.md` |
+| **ready 상태 lock holder 기부 버그 수정** — 재현 테스트를 먼저 쓰고 고쳤다. 불변식 소유자를 `thread_set_effective_priority()` 하나로 통일 | [`15dacef`](https://github.com/woonyong-choi/lrn-pintos/commit/15dacef), [`4d1cd47`](https://github.com/woonyong-choi/lrn-pintos/commit/4d1cd47) | `priority-donate-ready.c` (신규), `thread.c`, `synch.c` |
+| **설계 근거 문서화** — 고른 자료구조·버린 대안·알려진 한계 | [`2ec378a`](https://github.com/woonyong-choi/lrn-pintos/commit/2ec378a) | `docs/design.md` (신규), `README.md` |
+| 죽은 코드·유령 파일 제거 — 참조 없는 스크립트·이미지·문서, 구현이 끝난 자리에 남은 TODO | [`e820dc4`](https://github.com/woonyong-choi/lrn-pintos/commit/e820dc4) | `vm.c`, `synch.c`, `docs/`, `scripts/` |
 
-팀 과제 종료 시점(`5c8f52c`) 대비 커널 코드 순증은 `pintos/` 기준 +188/-14행입니다(`git diff --stat 5c8f52c HEAD -- pintos/`).
+팀 과제 종료 시점(`7aa964b`) 대비 커널 코드 순증은 `pintos/` 기준 +381/-100행입니다(`git diff --stat 7aa964b HEAD -- pintos/`).
 
 ## 구동방법
 
@@ -156,7 +159,7 @@ docker run --rm --platform linux/amd64 -v "$PWD:/w" -w /w pintos-dev \
 | vm | **141/141** | `make -C pintos/vm check` |
 | **합계** | **168/168** | |
 
-두 스위트 모두 **2026-09-22 로컬 Docker(linux/amd64)에서 직접 재실행**해 확인했습니다.[^run] 같은 트리(`d8a194d`)의 GitHub Actions 실행 기록도 같은 수치입니다.[^ci]
+두 스위트 모두 **2026-09-22 로컬 Docker(linux/amd64)에서 직접 재실행**해 확인했습니다.[^run] 같은 트리(`7286e4c`)의 GitHub Actions 실행 기록도 같은 수치입니다.[^ci]
 
 ```bash
 source pintos/activate
@@ -179,6 +182,6 @@ make -C pintos/vm check          # All 141 tests passed.
 - [커널 라이선스](pintos/LICENSE)
 
 [^authors]: `git log --author='woonyong' --since=2026-06-01 --reverse --format='%h %ad %s' --date=short`
-[^stub]: `git show 09df7c8^:pintos/threads/thread.c` 의 `thread_set_nice`·`thread_get_nice`·`thread_get_load_avg`·`thread_get_recent_cpu`.
+[^stub]: `git show 3162890^:pintos/threads/thread.c` 의 `thread_set_nice`·`thread_get_nice`·`thread_get_load_avg`·`thread_get_recent_cpu`.
 [^run]: `docker run --rm --platform linux/amd64 -v "$PWD:/w" -w /w <devcontainer image> bash -lc "source pintos/activate && make -C pintos/threads check && make -C pintos/vm check"` → `All 27 tests passed.` / `All 141 tests passed.`
-[^ci]: [GitHub Actions run 34506766057](https://github.com/woonyong-choi/lrn-pintos/actions/runs/34506766057) (2026-09-10, commit `d8a194d`).
+[^ci]: [GitHub Actions run 34506766057](https://github.com/woonyong-choi/lrn-pintos/actions/runs/34506766057) (2026-09-10, commit `7286e4c`). 해당 실행 페이지에는 이력 재작성 전 해시 `d8a194d`로 기록돼 있습니다 — 트리 내용은 같습니다.
