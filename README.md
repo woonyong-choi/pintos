@@ -12,7 +12,7 @@ MLFQS는 `thread_set_nice`·`thread_get_load_avg`·`thread_get_recent_cpu`가 �
 
 두 번째가 더 뼈아팠습니다. `thread_create()`에서 새 스레드에게 CPU를 양보할지 판단할 때 **호출자가 넘긴 `priority` 인자를 비교하고 있었고, 실제로 스레드에 설정된 `t->priority`를 봐야 했습니다.** 기본 스케줄러에서는 두 값이 같아 증상이 없었지만, MLFQS에서는 생성 직후 우선순위가 다시 계산되므로 엉뚱한 스레드가 CPU를 잡습니다. `priority` → `t->priority`, 한 글자짜리 차이인데 그때까지 통과하던 테스트는 아무것도 잡아주지 못했습니다.
 
-고친 뒤 vm 141개 회귀를 다시 돌려 깨진 것이 없는지 확인했고, 로컬에서만 재현되는 걸 막으려고 x86 QEMU CI를 붙였습니다.
+고친 뒤 vm 회귀 전체를 다시 돌려 깨진 것이 없는지 확인했고, 로컬에서만 재현되는 걸 막으려고 x86 QEMU CI를 붙였습니다.
 
 **그리고 같은 종류의 구멍이 하나 더 있었습니다.** 선점 버그를 잡고 나서
 "테스트가 통과하는데 틀린 코드가 또 없을까" 를 `ready_list` 기준으로 다시 봤습니다.
@@ -151,25 +151,24 @@ docker run --rm --platform linux/amd64 -v "$PWD:/w" -w /w pintos-dev \
 
 [![CI](https://github.com/woonyong-choi/lrn-pintos/actions/workflows/ci.yml/badge.svg)](https://github.com/woonyong-choi/lrn-pintos/actions/workflows/ci.yml)
 
-**threads 27개, vm 141개 — 총 168개 전부 통과**합니다.
+**threads 28개, vm 142개 전부 통과**합니다. (vm 스위트는 threads 테스트를 함께 돌리므로 두 수치는 겹칩니다.)
 
 | 스위트 | 통과 | 명령 |
 |---|---:|---|
-| threads | **27/27** | `make -C pintos/threads check` |
-| vm | **141/141** | `make -C pintos/vm check` |
-| **합계** | **168/168** | |
+| threads | **28/28** | `make -C pintos/threads check` |
+| vm | **142/142** | `make -C pintos/vm check` |
 
-두 스위트 모두 **2026-09-22 로컬 Docker(linux/amd64)에서 직접 재실행**해 확인했습니다.[^run] 같은 트리(`7286e4c`)의 GitHub Actions 실행 기록도 같은 수치입니다.[^ci]
+두 스위트 모두 **2026-09-22 로컬 Docker(linux/amd64)에서 현재 트리로 직접 재실행**해 확인했습니다.[^run] 아래 "구동방법" 의 명령을 **비어 있는 컨테이너와 새 체크아웃에서 그대로 복사해** 돌린 결과입니다.
 
 ```bash
 source pintos/activate
-make -C pintos/threads check     # All 27 tests passed.
-make -C pintos/vm check          # All 141 tests passed.
+make -C pintos/threads check     # All 28 tests passed.
+make -C pintos/vm check          # All 142 tests passed.
 ```
 
 ### 현재 범위와 한계
 
-교육용 커널로서 범용 OS의 장치 드라이버·보안·다중 코어 지원을 목표로 하지 않습니다. **QEMU 검사 통과가 모든 메모리 압박·스케줄링 조합의 정확성을 보장하지 않습니다** — 실제로 위의 선점 버그는 141개 테스트를 통과하는 동안 남아 있었습니다. swap은 참조 수가 1인 프레임만 고르므로 공유 중인 프레임까지 자유롭게 교체하는 구현은 아닙니다. 파일 시스템 과제(buffer cache, extensible file, subdirectory)는 범위 밖입니다.
+교육용 커널로서 범용 OS의 장치 드라이버·보안·다중 코어 지원을 목표로 하지 않습니다. **QEMU 검사 통과가 모든 메모리 압박·스케줄링 조합의 정확성을 보장하지 않습니다** — 실제로 위의 버그 두 개는 모두 전체 스위트를 통과하는 동안 남아 있었습니다 — 두 번째 것은 `priority-donate-ready`를 새로 쓰기 전까지 어떤 테스트도 건드리지 않던 경로였습니다. swap은 참조 수가 1인 프레임만 고릅니다 — 정책이 아니라 프레임에서 역으로 매핑을 찾을 구조가 없어서 생긴 제약이고, 이유는 [설계 노트 §3](docs/design.md)에 적었습니다. 파일 시스템 과제(buffer cache, extensible file, subdirectory)는 범위 밖입니다.
 
 팀 원본과 비교할 때는 저장소 이름뿐 아니라 커밋을 함께 확인합니다.
 
@@ -183,5 +182,4 @@ make -C pintos/vm check          # All 141 tests passed.
 
 [^authors]: `git log --author='woonyong' --since=2026-06-01 --reverse --format='%h %ad %s' --date=short`
 [^stub]: `git show 3162890^:pintos/threads/thread.c` 의 `thread_set_nice`·`thread_get_nice`·`thread_get_load_avg`·`thread_get_recent_cpu`.
-[^run]: `docker run --rm --platform linux/amd64 -v "$PWD:/w" -w /w <devcontainer image> bash -lc "source pintos/activate && make -C pintos/threads check && make -C pintos/vm check"` → `All 27 tests passed.` / `All 141 tests passed.`
-[^ci]: [GitHub Actions run 34506766057](https://github.com/woonyong-choi/lrn-pintos/actions/runs/34506766057) (2026-09-10, commit `7286e4c`). 해당 실행 페이지에는 이력 재작성 전 해시 `d8a194d`로 기록돼 있습니다 — 트리 내용은 같습니다.
+[^run]: `docker build --platform linux/amd64 -t pintos-dev .devcontainer/` 로 이미지를 새로 만들고, `git archive HEAD` 로 뽑은 새 체크아웃을 `docker run --rm --platform linux/amd64 -v "$PWD:/w" -w /w pintos-dev bash -lc "source pintos/activate && make -C pintos/threads check && make -C pintos/vm check"` → `All 28 tests passed.` / `All 142 tests passed.`
