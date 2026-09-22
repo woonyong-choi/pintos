@@ -28,6 +28,21 @@ jobs:
           source pintos/activate
           make -C pintos/threads check
 
+  user-programs:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install x86 emulator
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes qemu-system-x86
+      - name: Run user-program tests
+        shell: bash
+        run: |
+          source pintos/activate
+          make -C pintos/userprog check
+
   virtual-memory:
     runs-on: ubuntu-22.04
     timeout-minutes: 35

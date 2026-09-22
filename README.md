@@ -64,7 +64,6 @@ QEMU에서 실제로 `make check`를 실행한 화면입니다(threads 테스트
 
 - **`list_insert_ordered` 비교 횟수를 계측**해 "스레드 수가 이 정도면 정렬 리스트로 충분하다"를 숫자로 만든다. 지금 그 주장의 근거는 복잡도 분석뿐이다([설계 노트 §5](docs/design.md)).
 - 프레임마다 `(thread, va)` **역매핑**을 붙여 공유 중인 프레임까지 교체 대상으로 넓힌다. 현재 `ref_count == 1` 제한은 정책이 아니라 이 구조가 없어서 생긴 제약이다.
-- userprog 스위트를 CI에 추가해 threads·vm과 함께 회귀로 묶는다.
 - swap 슬롯 고갈 경로를 테스트로 재현한다. 실패 반환은 있지만 그때 커널이 어떻게 보이는지 확인한 적이 없다.
 - 파일 시스템 과제(buffer cache, extensible file, subdirectory)를 이어서 구현한다.
 
@@ -122,6 +121,7 @@ cd lrn-pintos
 ```bash
 source pintos/activate
 make -C pintos/threads check     # 스레드 스케줄링
+make -C pintos/userprog check    # 사용자 프로그램
 make -C pintos/vm check          # 가상 메모리
 ```
 
@@ -132,6 +132,16 @@ docker build --platform linux/amd64 -t pintos-dev .devcontainer/
 docker run --rm --platform linux/amd64 -v "$PWD:/w" -w /w pintos-dev \
   bash -lc 'source pintos/activate && make -C pintos/threads check'
 ```
+
+세 검사 모두 [CI](.github/workflows/ci.yml)의 개별 job으로 매 push·PR마다 실행합니다.
+
+| 검사 | 명령 | CI job | 최근 측정 |
+| --- | --- | --- | --- |
+| 스레드 | `make -C pintos/threads check` | `threads` | 28개 통과 (아래 검증 절) |
+| 사용자 프로그램 | `make -C pintos/userprog check` | `user-programs` | 95/95 통과 |
+| 가상 메모리 | `make -C pintos/vm check` | `virtual-memory` | 142개 통과 (아래 검증 절) |
+
+사용자 프로그램 95/95는 x86-64 Dev Container(`.devcontainer/Dockerfile`, Ubuntu 22.04 + `qemu-system-x86`)에서 측정한 값입니다.
 
 `activate`는 저장소의 `pintos/utils`를 PATH에 추가합니다. 각 명령은 커널을 빌드하고 QEMU에서 검사를 실행하며, 개별 실행 출력과 판정은 해당 디렉터리의 `build/tests/`에 남습니다. 단계별 구현 기록은 [`docs/pintos/`](docs/pintos/)를 참조합니다.
 
@@ -145,7 +155,7 @@ docker run --rm --platform linux/amd64 -v "$PWD:/w" -w /w pintos-dev \
 | 빌드 | GNU Make, GCC, Perl (테스트 하니스) |
 | 실행·검증 | QEMU (`qemu-system-x86`) |
 | 개발 환경 | Dev Container — Ubuntu 22.04 linux/amd64 |
-| CI | GitHub Actions `ubuntu-22.04`, threads·vm job 분리 |
+| CI | GitHub Actions `ubuntu-22.04`, threads·userprog·vm job 분리 |
 
 ## 검증
 
