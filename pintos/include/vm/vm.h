@@ -46,12 +46,9 @@ struct page {
 	void *va;              /* 유저 공간 기준 주소 */
 	struct frame *frame;   /* frame에서 page로 되돌아오는 참조 */
 
-	/* 구현부 */
-	/* HOSEOK'S CODE */
-	struct hash_elem hash_elem;
-	bool writable;
-	/* HOSEOK'S CODE */
-	
+	struct hash_elem hash_elem; /* SPT 해시 테이블의 원소 */
+	bool writable;              /* 쓰기 허용 여부, COW 판정의 기준 */
+
 	/* 타입별 데이터는 union에 묶여 있다.
 	 * 각 함수는 현재 어떤 union 멤버를 써야 하는지 자동으로 판단한다. */
 	union {
@@ -66,11 +63,11 @@ struct page {
 
 /* "frame"의 표현. */
 struct frame {
-	void *kva;
-	struct page *page;
-	struct list_elem elem;   // frame table에 연결하기 위한 필드
-	struct thread *owner_thread;
-	size_t ref_count;
+	void *kva;                    /* 커널 가상 주소 (palloc PAL_USER) */
+	struct page *page;            /* 현재 이 프레임에 올라와 있는 페이지 */
+	struct list_elem elem;        /* frame_table의 원소, clock 순회 대상 */
+	struct thread *owner_thread;  /* 매핑을 건 스레드, swap-out 시 pml4 정리용 */
+	size_t ref_count;             /* COW 공유 수. 1이어야 교체 후보가 된다 */
 };
 
 /* 페이지 연산용 함수 테이블.

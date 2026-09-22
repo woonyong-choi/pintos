@@ -14,12 +14,31 @@ MLFQS는 `thread_set_nice`·`thread_get_load_avg`·`thread_get_recent_cpu`가 �
 
 고친 뒤 vm 141개 회귀를 다시 돌려 깨진 것이 없는지 확인했고, 로컬에서만 재현되는 걸 막으려고 x86 QEMU CI를 붙였습니다.
 
+**그리고 같은 종류의 구멍이 하나 더 있었습니다.** 선점 버그를 잡고 나서
+"테스트가 통과하는데 틀린 코드가 또 없을까" 를 `ready_list` 기준으로 다시 봤습니다.
+`ready_list`는 우선순위 내림차순 **정렬을 불변식으로** 두고 `next_thread_to_run()`이
+뒤를 훑지 않고 front만 pop합니다. 그러면 **이미 큐에 들어 있는 스레드의 우선순위를
+바꾸는 경로가 전부** 위치까지 옮겨야 하는데, priority donation은 `holder->priority`에
+값만 쓰고 있었습니다. lock 소유자가 실행 중이 아니라 ready 상태로 대기 중일 때
+기부는 도착하지만 큐 순서는 그대로여서, **donation이 없애려던 priority inversion이
+그대로 남습니다.** KAIST의 priority-donate 테스트 8개는 전부 *실행 중인* 스레드에게
+기부하기 때문에 하나도 이걸 잡지 못합니다.
+
+이번에는 순서를 바꿔서, **먼저 재현 테스트를 쓰고**
+([`priority-donate-ready`](pintos/tests/threads/priority-donate-ready.c))
+그게 `false`를 뱉는 걸 확인한 뒤에 고쳤습니다. 고친 방법은 불변식의 소유자를 하나로
+만드는 것입니다 — `thread_set_effective_priority()`가 값 쓰기와 큐 위치 이동을 같이
+하고, 기부·`refresh_priority` 경로가 전부 이 함수를 거칩니다.
+
 | 항목 | 팀 과제 종료 시점 | 현재 |
 |---|---|---|
 | MLFQS (`nice`·`recent_cpu`·`load_avg`) | **미구현** — `/* TODO */` 스텁이 `0` 반환[^stub] | **4BSD 규칙 구현**, 17.14 고정소수점 |
 | MLFQS 갱신 대상 | — | **전체 스레드(`all_elem`, blocked 포함)** |
 | MLFQS + priority donation | — | **MLFQS일 때 donation 경로 우회** |
 | `thread_create` 선점 판단 | 인자 `priority` 비교 (MLFQS에서 오동작) | **`t->priority` 비교** |
+| ready 상태 lock holder에게 기부 | 값만 덮어써 큐 순서가 깨짐 → inversion 잔존 | **`thread_set_effective_priority()`가 큐 위치까지 이동** |
+| 그 버그의 재현 테스트 | 없음 (기존 8개는 *실행 중* 스레드에만 기부) | **`priority-donate-ready` 추가** |
+| 설계 근거 문서 | 없음 | **[`docs/design.md`](docs/design.md) — 고른 것·버린 대안·한계** |
 | 회귀 검증 | 로컬 수동 | **x86 QEMU GitHub Actions (threads·vm job 분리)** |
 
 ## 구동모습
@@ -32,22 +51,26 @@ QEMU에서 실제로 `make check`를 실행한 화면입니다(threads 테스트
 
 ![구조도: 스레드 스케줄링, 프로세스, 가상 메모리, Copy-on-Write로 이어지는 경로](docs/figure.png)
 
-- **우선순위 스케줄링과 priority donation** — 높은 우선순위부터 실행하고, lock 대기 시 소유자에게 우선순위를 넘겨 priority inversion을 막습니다. 중첩 donation과 다중 lock 보유를 처리합니다. → [`threads/thread.c`](pintos/threads/thread.c), [`threads/synch.c`](pintos/threads/synch.c)
-- **4BSD MLFQS (17.14 고정소수점)** — `nice`·`recent_cpu`·`load_avg`로 우선순위를 주기적으로 재계산합니다. 1초마다 `load_avg`와 전체 스레드의 `recent_cpu`를, 4틱마다 우선순위를 갱신합니다. → [`threads/thread.c`](pintos/threads/thread.c)
-- **Copy-on-Write fork** — fork 시 프레임을 읽기 전용으로 공유하다 쓰기 page fault에서 복사합니다. 참조가 하나만 남으면 복사 없이 쓰기 권한만 돌려줍니다. → [`vm/vm.c`](pintos/vm/vm.c)
-- **참조 수 기반 프레임 교체** — 프레임마다 `ref_count`와 `owner_thread`를 추적하고, **참조 수가 1인 프레임만 교체 대상으로 선택**합니다. swap-out 시 소유자의 `pml4`에서 해당 페이지를 함께 내려 stale mapping을 남기지 않습니다. → [`include/vm/vm.h`](pintos/include/vm/vm.h), [`vm/vm.c`](pintos/vm/vm.c), swap 연산은 [`vm/anon.c`](pintos/vm/anon.c)
+**왜 이 자료구조를 골랐고 무엇을 버렸는지는 [설계 노트](docs/design.md)에 정리했습니다.**
+
+- **우선순위 스케줄링과 priority donation** — 높은 우선순위부터 실행하고, lock 대기 시 소유자에게 우선순위를 넘겨 priority inversion을 막습니다. 중첩 donation과 다중 lock 보유를 처리합니다. `ready_list`는 정렬을 불변식으로 두고 `next_thread_to_run()`이 front만 pop하므로, 기부가 일어나면 값뿐 아니라 큐 위치까지 옮겨야 합니다 — `thread_set_effective_priority()`가 그 책임을 혼자 집니다. → [`threads/thread.c`](pintos/threads/thread.c), [`threads/synch.c`](pintos/threads/synch.c), [설계 노트 §1](docs/design.md)
+- **4BSD MLFQS (17.14 고정소수점)** — `nice`·`recent_cpu`·`load_avg`로 우선순위를 주기적으로 재계산합니다. 1초마다 `load_avg`와 전체 스레드의 `recent_cpu`를, 4틱마다 우선순위를 갱신합니다. 17.14를 고른 이유와 16.16을 버린 이유는 [설계 노트 §2](docs/design.md). → [`threads/thread.c`](pintos/threads/thread.c)
+- **Copy-on-Write fork** — fork 시 프레임을 읽기 전용으로 공유하다 쓰기 page fault에서 복사합니다. 참조가 하나만 남으면 복사 없이 쓰기 권한만 돌려줍니다. `page->writable`(원래 권한)과 pml4 쓰기 비트(현재 권한)를 분리해 복구 가능한 fault와 죽여야 하는 fault를 가릅니다. → [`vm/vm.c`](pintos/vm/vm.c), [설계 노트 §4](docs/design.md)
+- **accessed bit를 쓰는 clock 프레임 교체** — `clock_hand`가 프레임 테이블을 원형으로 돌며 `pml4_is_accessed()`가 켜진 프레임은 비트를 내리고 한 번 봐줍니다(second chance). swap-out 시 소유자의 `pml4`에서 해당 페이지를 함께 내려 stale mapping을 남기지 않습니다. **COW로 공유 중인 프레임(`ref_count > 1`)은 후보에서 제외되는데, 이건 정책이 아니라 역매핑이 없어서 생긴 제약입니다** — 자세한 이유는 [설계 노트 §3](docs/design.md). → [`include/vm/vm.h`](pintos/include/vm/vm.h), [`vm/vm.c`](pintos/vm/vm.c), swap 연산은 [`vm/anon.c`](pintos/vm/anon.c)
 - **Demand paging · mmap · stack growth** — 접근 시점에 페이지를 채우고, 파일 backed 페이지와 스택 확장을 page fault 경로에서 구분합니다. → [`vm/file.c`](pintos/vm/file.c), [`vm/vm.c`](pintos/vm/vm.c)
 - **프로세스 수명 관리** — fork·exec·wait, 부모·자식 종료 순서, **부모가 먼저 죽은 자식(orphan)의 상태 회수**를 두 개의 세마포어로 처리합니다. → [`userprog/process.c`](pintos/userprog/process.c), [설계 노트](docs/pintos/10-orphan-reaping.md)
 
 ## 계획
 
+- **`list_insert_ordered` 비교 횟수를 계측**해 "스레드 수가 이 정도면 정렬 리스트로 충분하다"를 숫자로 만든다. 지금 그 주장의 근거는 복잡도 분석뿐이다([설계 노트 §5](docs/design.md)).
+- 프레임마다 `(thread, va)` **역매핑**을 붙여 공유 중인 프레임까지 교체 대상으로 넓힌다. 현재 `ref_count == 1` 제한은 정책이 아니라 이 구조가 없어서 생긴 제약이다.
 - userprog 스위트를 CI에 추가해 threads·vm과 함께 회귀로 묶는다.
-- swap 경로를 **공유 중인 프레임까지** 교체 대상으로 넓힌다. 현재는 참조 수 1인 프레임만 고른다.
+- swap 슬롯 고갈 경로를 테스트로 재현한다. 실패 반환은 있지만 그때 커널이 어떻게 보이는지 확인한 적이 없다.
 - 파일 시스템 과제(buffer cache, extensible file, subdirectory)를 이어서 구현한다.
-- 메모리 압박·스케줄링 조합을 무작위로 섞는 스트레스 테스트를 만들어 QEMU 통과가 못 잡는 구간을 찾는다.
 
 ## 링크
 
+- [설계 노트](docs/design.md) — 왜 이 자료구조인지, 버린 대안, 알려진 한계
 - [PintOS Wiki](https://docs.woonyong.com/wiki/pintos/) — 단계별 개념 정리
 - [단계별 구현 기록](docs/pintos/)
 - [부모 종료 후 자식 상태 회수 설계](docs/pintos/10-orphan-reaping.md)
@@ -150,7 +173,7 @@ make -C pintos/vm check          # All 141 tests passed.
 ## 참고자료
 
 - [KAIST PintOS 과제 안내](https://casys-kaist.github.io/pintos-kaist/) — 골격 코드와 테스트 하니스 출처
-- [단계별 구현 기록](docs/pintos/) · [부모 종료 후 회수 설계](docs/pintos/10-orphan-reaping.md)
+- [설계 노트](docs/design.md) · [단계별 구현 기록](docs/pintos/) · [부모 종료 후 회수 설계](docs/pintos/10-orphan-reaping.md)
 - [팀 원본 저장소 Jungle-12-303/wk11_7](https://github.com/Jungle-12-303/wk11_7)
 - Operating System Concepts (Silberschatz) — MLFQS·priority inversion
 - [커널 라이선스](pintos/LICENSE)
