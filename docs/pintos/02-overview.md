@@ -169,4 +169,3 @@ static void schedule(void) {
 | `06-priority-scheduling.md` | Priority Scheduling + Priority Donation |
 | `07-advanced-scheduler.md` | MLFQS (4.4BSD 스케줄러) |
 | `08-implementation-guide.md` | 구현 순서 및 전략 가이드 |
-| `09-team-strategy.md` | 팀 협업 전략 |

@@ -112,7 +112,7 @@ Phase 4: Advanced Scheduler — MLFQS (1~2일)
 
 ## 코딩 스타일
 
-Pintos는 C 프로젝트이므로 `docs/convention/c-style.md`를 따른다.
+Pintos는 C 프로젝트이므로 커널 소스의 기존 GNU 스타일(탭 들여쓰기, 함수 이름과 여는 괄호 사이 공백)을 그대로 따른다.
 핵심 규칙만 요약하면 다음과 같다.
 
 - 들여쓰기: 4칸 스페이스 (탭 금지)
@@ -128,7 +128,7 @@ Pintos는 C 프로젝트이므로 `docs/convention/c-style.md`를 따른다.
 
 ### 커밋 메시지
 
-`docs/convention/commit-convention.md`를 따른다.
+Conventional Commits 형식을 따른다.
 
 ```
 <type>: <한국어 제목>
@@ -293,8 +293,6 @@ backtrace build/kernel.o 0x800... 0x800... 0x800...
 ---
 
 ## 팀 협업 전략
-
-별도 문서 `09-team-strategy.md` 에 상세히 정리되어 있다.
 
 핵심 방침: **각자 전부 구현하고, 머지 담당은 돌아가면서 맡는다.**
 매일 코어타임에 4명의 코드를 비교하고, 머지 담당자가 기준 코드를 선택하여 master에 병합한다.

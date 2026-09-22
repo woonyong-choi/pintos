@@ -28,7 +28,7 @@ static const struct page_operations anon_ops = {
 /* Initialize the data for anonymous pages */
 void
 vm_anon_init (void) {
-	/* TODO: Set up the swap_disk. */
+	/* 채널 1, 장치 1이 pintos-mkdisk가 만든 swap 디스크다. */
 	swap_disk = disk_get (1, 1);
 	lock_init (&swap_lock);
 	swap_table = swap_disk == NULL ? NULL :

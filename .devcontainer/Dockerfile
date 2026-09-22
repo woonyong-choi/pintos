@@ -6,8 +6,6 @@ ENV TZ=Asia/Seoul LANG=ko_KR.UTF-8 LANGUAGE=ko_KR.UTF-8
 # Install dependencies
 RUN export DEBIAN_FRONTEND=noninteractive && \
     apt-get update \
-    # && echo "tzdata tzdata/Areas select Asia" | debconf-set-selections \
-    # && echo "tzdata tzdata/Zones/Asia select Seoul" | debconf-set-selections \
     && apt-get install -y \
     locales tzdata \
     build-essential \
@@ -18,9 +16,8 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
     sudo \
     qemu-system-x86 \
     python3 \
-    && locale-gen ko_KR.UTF-8 && update-locale LANG=ko_KR.UTF-8 
-# && apt-get clean \
-# && rm -rf /var/lib/apt/lists/*
+    && locale-gen ko_KR.UTF-8 && update-locale LANG=ko_KR.UTF-8 \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash jungle && usermod -aG sudo jungle
 RUN echo "jungle ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/jungle
@@ -28,9 +25,7 @@ RUN echo "jungle ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/jungle
 USER jungle
 WORKDIR /home/jungle
 
-RUN echo "source /workspaces/SW_AI-W09-pintos/pintos/activate" >> /home/jungle/.bashrc
-
-# Clone the repository
-# RUN git clone https://github.com/casys-kaist/pintos-kaist /home/jungle/pintos
-
-# Set default shell for the `jungle` user
+# 컨테이너 셸에서 pintos/utils를 PATH에 올린다.
+# 저장소 폴더 이름이 바뀌어도 따라가도록 와일드카드로 찾는다.
+RUN echo 'for a in /workspaces/*/pintos/activate; do [ -f "$a" ] && source "$a" && break; done' \
+    >> /home/jungle/.bashrc

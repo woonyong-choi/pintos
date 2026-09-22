@@ -25,9 +25,8 @@ vm_init (void) {
 #endif
 	register_inspect_intr ();
 	/* DO NOT MODIFY UPPER LINES. */
-	/* TODO: Your code goes here. */
-	list_init(&frame_table);
-	lock_init(&frame_lock);
+	list_init (&frame_table);
+	lock_init (&frame_lock);
 	clock_hand = NULL;
 }
 
@@ -172,8 +171,6 @@ spt_remove_page (struct supplemental_page_table *spt, struct page *page) {
 
 	hash_delete (&spt->hash_table, &page->hash_elem);
 	vm_dealloc_page (page);
-
-	// return true;
 }
 
 /* 교체 대상이 될 struct frame을 고른다. */
@@ -267,30 +264,21 @@ vm_evict_frame (void) {
  * 즉, user pool 메모리가 가득 차 있더라도 페이지를 eviction해서
  * 사용할 수 있는 메모리 공간을 확보한다.
  */
-/* user pool 에서 공간 할당 받아오기
-frame에 올리기 위해 할당받는곳 
- */
 static struct frame *
 vm_get_frame (void) {
-	struct frame *frame = malloc(sizeof* frame);
+	struct frame *frame = malloc (sizeof *frame);
 	RETURN_VALUE_IF (frame == NULL, NULL);
 
 	frame->kva = palloc_get_page (PAL_USER);
-	if(frame->kva != NULL) {
+	if (frame->kva != NULL) {
 		frame->page = NULL;
-	}
-	else {
-		free(frame);
+	} else {
+		/* user pool이 비었다. 기존 프레임 하나를 내보내고 재사용한다. */
+		free (frame);
 		frame = vm_evict_frame ();
 		RETURN_VALUE_IF (frame == NULL, NULL);
 	}
-	/*
-	list_init(&frame_table) vm 초기화 시점에 있어야함
 
-	lock_acquire(&frame_table_lock)
-	list_push_back(...)
-	lock_release(&frame_table_lock)
-	 */
 	frame->owner_thread = thread_current ();
 	frame->ref_count = 1;
 
@@ -307,14 +295,12 @@ vm_get_frame (void) {
 			}
 		}
 		if (!in_table)
-			list_push_back(&frame_table, &frame->elem);
+			list_push_back (&frame_table, &frame->elem);
 		lock_release (&frame_lock);
 	}
 
-	// ASSERT (frame != NULL);
-	// ASSERT (frame->page == NULL);
-
-	// 만든 frame free는 언제하지 
+	/* 프레임은 frame_table이 소유한다. 마지막 참조가 사라질 때
+	   vm_destroy_page_frame()이 palloc 페이지와 struct frame을 함께 푼다. */
 	return frame;
 }
 
@@ -403,7 +389,7 @@ vm_remap_page (struct page *page, struct frame *frame, bool writable) {
 }
 
 
-// OS가 복구할 수 있는 page fault를 처리
+/* OS가 복구할 수 있는 page fault를 처리한다. */
 bool
 vm_try_handle_fault (struct intr_frame *f, void *addr,
                      bool user, bool write, bool not_present) {
@@ -411,7 +397,7 @@ vm_try_handle_fault (struct intr_frame *f, void *addr,
 	RETURN_VALUE_IF (!not_present, vm_handle_write_protect_fault (addr, write));
 	return vm_handle_not_present_fault (f, addr, user, write);
 }
-// fault 주소가 NULL이거나 커널 영역이면 복구할 수 없는 fault로 판단
+/* fault 주소가 NULL이거나 커널 영역이면 복구할 수 없는 fault다. */
 static bool
 vm_fault_addr_invalid (void *addr) {
 	return addr == NULL || is_kernel_vaddr (addr);
@@ -426,28 +412,30 @@ vm_handle_not_present_fault (struct intr_frame *f, void *addr,
 	return vm_grow_stack_and_claim (addr);
 }
 
-// SPT에 등록된 page가 있으면 실제 프레임 매핑
+/* SPT에 등록된 page가 있으면 실제 프레임에 매핑한다. */
 static bool
 vm_claim_spt_page (void *addr, bool write) {
 	struct supplemental_page_table *spt = &thread_current ()->spt;
 	struct page *page = spt_find_page (spt, addr);
 
-	// SPT에 page가 없거나, write 요청이 있고 page가 writable이 아니면 실패
 	RETURN_VALUE_IF (page == NULL, false);
 	RETURN_VALUE_IF (write && !page->writable, vm_handle_unwritable_spt_page (page));
 
-	// page 맵핑
 	return vm_do_claim_page (page);
 }
 
-// SPT page는 찾았지만 쓰기 권한을 허용할 수 없는 fault 처리
+/*
+ * SPT에는 있지만 쓰기가 금지된 페이지에 대한 not-present 쓰기 fault.
+ * 읽기 전용 매핑에 대한 진짜 권한 위반이므로 복구하지 않는다.
+ * COW는 페이지가 이미 매핑돼 있을 때(present) 일어나므로
+ * vm_handle_write_protect_fault() 쪽에서 처리한다.
+ */
 static bool
 vm_handle_unwritable_spt_page (struct page *page UNUSED) {
-	/* TODO: copy-on-write를 구현하면 여기서 처리한다. */
 	return false;
 }
 
-// addr가 정상적인 스택 성장인지 판단
+/* addr가 정상적인 스택 성장인지 판단한다. */
 static bool
 vm_should_grow_stack (struct intr_frame *f, void *addr, bool user) {
 	RETURN_VALUE_IF (addr == NULL, false);
@@ -469,8 +457,6 @@ vm_should_grow_stack (struct intr_frame *f, void *addr, bool user) {
 /* 스택 페이지를 만들고 즉시 claim한다. */
 static bool
 vm_grow_stack_and_claim (void *addr) {
-	/* TODO: vm_stack_growth()에서 pg_round_down(addr)에 VM_ANON 스택
-	 * 페이지를 SPT에 추가하게 만든 뒤 claim한다. */
 	vm_stack_growth (addr);
 	return vm_claim_page (pg_round_down (addr));
 }
@@ -680,8 +666,6 @@ spt_copy_cow_page (struct supplemental_page_table *dst,
 /* Free the resource hold by the supplemental page table */
 void
 supplemental_page_table_kill (struct supplemental_page_table *spt UNUSED) {
-	/* TODO: Destroy all the supplemental_page_table hold by thread and
-	 * TODO: writeback all the modified contents to the storage. */
 	RETURN_IF (spt == NULL);
 	hash_destroy (&spt->hash_table, spt_page_destroy);
 }
