@@ -24,11 +24,13 @@ MLFQS는 `thread_set_nice`·`thread_get_load_avg`·`thread_get_recent_cpu`가 �
 
 ## 구동모습
 
-QEMU에서 커널을 부팅하고 우선순위 스케줄링 테스트(`alarm-priority`)를 실행하는 모습입니다. 10개 스레드가 **우선순위 30 → 21 순서대로** 깨어나는 것이 스케줄러가 의도대로 도는 증거입니다.
+QEMU에서 실제로 `make check`를 실행한 화면입니다(threads 테스트 6개, 2배속 재생). `alarm-single`·`alarm-priority`·`priority-change`·`priority-donate-one`·`priority-donate-nest`·`priority-sema`가 모두 통과해 "All 6 tests passed."가 출력됩니다. `pass` 줄이 두 번 나오는 것은 테스트 실행 중 한 번, `make check`의 요약에서 한 번 출력되기 때문입니다. Apple Silicon에서 Docker(linux/amd64 에뮬레이션)로 돌렸고 재현은 `docker build --load -t pintos-demo -f scripts/Dockerfile.demo scripts && bash scripts/demo_check.sh`입니다. 전체 threads·vm 스위트는 이 GIF에 포함하지 않았고 CI가 실행합니다.
 
 ![PintOS 테스트 실행 GIF](docs/demo.gif)
 
 ## 메인 기술
+
+![구조도: 스레드 스케줄링, 프로세스, 가상 메모리, Copy-on-Write로 이어지는 경로](docs/figure.png)
 
 - **우선순위 스케줄링과 priority donation** — 높은 우선순위부터 실행하고, lock 대기 시 소유자에게 우선순위를 넘겨 priority inversion을 막습니다. 중첩 donation과 다중 lock 보유를 처리합니다. → [`threads/thread.c`](pintos/threads/thread.c), [`threads/synch.c`](pintos/threads/synch.c)
 - **4BSD MLFQS (17.14 고정소수점)** — `nice`·`recent_cpu`·`load_avg`로 우선순위를 주기적으로 재계산합니다. 1초마다 `load_avg`와 전체 스레드의 `recent_cpu`를, 4틱마다 우선순위를 갱신합니다. → [`threads/thread.c`](pintos/threads/thread.c)
