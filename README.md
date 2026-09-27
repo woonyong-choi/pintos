@@ -49,14 +49,14 @@ flowchart LR
   UP --> VM
 ```
 
-세 진입점(타이머 인터럽트·시스템 콜·페이지 폴트)이 각각 threads·userprog·vm으로 들어가고, userprog는 프로세스가 페이지를 요구하는 지점에서 vm과 다시 연결됩니다. 왜 이 자료구조를 골랐는지는 아래 "핵심 결정과 트레이드오프"에, 전체 설계 근거는 [설계 노트](docs/design.md)와 [단계별 구현 기록](docs/pintos/)에 있습니다.
+세 진입점(타이머 인터럽트·시스템 콜·페이지 폴트)이 각각 threads·userprog·vm으로 들어가고, userprog는 프로세스가 페이지를 요구하는 지점에서 vm과 다시 연결됩니다. 전체 설계 근거는 [설계 노트](docs/design.md)와 [단계별 구현 기록](docs/pintos/)에 있습니다.
 
-## 핵심 결정과 트레이드오프
+## 구현에서 확인한 점
 
-- **`ready_list` 정렬 불변식과 그것이 두 번 깨진 이유** — 문제: 스케줄러가 항상 최고 우선순위 스레드를 골라야 한다. 선택: `list_insert_ordered()`로 항상 정렬된 단일 연결 리스트를 유지하고 `next_thread_to_run()`은 front만 `O(1)`로 pop한다. 버린 대안: 64개 우선순위 버킷(4.4BSD 원본 방식) — 삽입·선택 모두 `O(1)`이지만, 이 커널은 스레드가 수십 개뿐이라 `O(n)` 차이가 측정 가능한 수준이 아니고 버킷은 초기화·MLFQS 재계산·donation 세 지점에서 일관성을 따로 지켜야 한다. 근거: 실제로 그 지점 중 하나를 놓쳤다 — `thread_create()`가 새 스레드의 실제 `t->priority` 대신 호출자가 넘긴 인자로 선점을 판단해 MLFQS에서만 오동작했고(기존 8개 priority-donate 테스트가 모두 *실행 중인* 스레드에게만 기부해 못 잡음), lock holder가 ready 상태로 대기 중일 때 기부가 값만 바뀌고 큐 위치는 그대로여서 priority inversion이 되돌아왔다. 두 버그 모두 재현 테스트([`priority-donate-ready.c`](pintos/tests/threads/priority-donate-ready.c))를 먼저 쓰고 `thread_set_effective_priority()`로 "값 쓰기 + 큐 위치 이동"의 소유자를 하나로 통일해 고쳤다. → [`threads/thread.c`](pintos/threads/thread.c), [`threads/synch.c`](pintos/threads/synch.c), [설계 노트 §1](docs/design.md)
-- **MLFQS 17.14 고정소수점** — 문제: 커널이 FPU를 쓰지 않는데 4.4BSD `recent_cpu` 감쇠 계수(`(2·load_avg)/(2·load_avg+1)`)는 1보다 작아 정수 나눗셈으로는 0 또는 1로 뭉개진다. 선택: `int32`를 정수부 17비트·소수부 14비트로 분할하고 곱셈·나눗셈은 `int64`로 승격한다. 버린 대안: 16.16 — 소수부 해상도는 좋아지지만 `recent_cpu` 상한(±32767)을 보장할 근거가 없어 오버플로 위험만 늘어난다. 갱신 대상도 ready 스레드가 아니라 `all_elem`으로 유지하는 전체 스레드(blocked 포함)여야 했다 — 자고 있는 스레드도 감쇠해야 깨어났을 때 우선순위가 맞기 때문이다. → [`threads/thread.c`](pintos/threads/thread.c), [설계 노트 §2](docs/design.md)
-- **accessed bit를 쓰는 clock 프레임 교체** — 문제: 메모리 압박 시 내보낼 프레임을 골라야 하는데 정확한 LRU는 매핑된 페이지의 접근이 fault를 내지 않아 커널이 관찰할 수 없다. 선택: `clock_hand`가 프레임 테이블을 원형으로 돌며 `pml4_is_accessed()`가 켜진 프레임은 비트를 내리고 한 번 봐주는 second-chance 방식(최대 2바퀴). 버린 대안: FIFO — 구현은 절반이지만 hot page와 오래 안 쓴 페이지를 구분 못 해 방금 쓴 페이지를 내보내고 곧바로 다시 읽어들인다. 한계: Copy-on-Write로 공유 중인 프레임(`ref_count > 1`)은 후보에서 제외되는데, 이건 정책이 아니라 `struct frame`이 소유자를 하나만 들고 있어 공유 프레임을 내릴 때 나머지 공유자의 매핑을 찾을 방법이 없는 구조적 제약이다. → [`vm/vm.c`](pintos/vm/vm.c), [설계 노트 §3](docs/design.md)
-- **Copy-on-Write fork** — 문제: 기본 `fork`는 부모의 모든 페이지를 자식에게 복사하지만, `fork` 직후 `exec`하는 흔한 패턴에서는 그 복사가 전부 폐기된다. 선택: `fork` 직후 양쪽 페이지 테이블이 같은 프레임을 읽기 전용으로 공유하고(`ref_count++`), 쓰기 page fault가 나면 `ref_count > 1`이면 새 프레임에 복사, `== 1`이면 복사 없이 쓰기 권한만 복원한다. `page->writable`(원래 권한)과 pml4 쓰기 비트(현재 권한)를 분리해 복구 가능한 fault와 죽여야 하는 fault를 가른다. 버린 대안: 매번 전체 복사(기본 구현) — 단순하지만 `fork`+`exec` 패턴에서 항상 낭비다. 과제 요구 범위 밖이었지만 이 비효율을 없애기로 했다. → [`vm/vm.c`](pintos/vm/vm.c), [설계 노트 §4](docs/design.md)
+- **우선순위 큐** — `ready_list`를 정렬 상태로 유지하고, 우선순위가 바뀌면 값 변경과 큐 재배치를 `thread_set_effective_priority()`로 묶었습니다. MLFQS 선점과 ready 상태 lock holder의 priority donation에서 각각 드러난 결함은 재현 테스트([`priority-donate-ready.c`](pintos/tests/threads/priority-donate-ready.c))로 고쳤습니다. → [`threads/thread.c`](pintos/threads/thread.c), [`threads/synch.c`](pintos/threads/synch.c)
+- **MLFQS 계산** — FPU 없이 `recent_cpu` 감쇠 계수를 계산하기 위해 17.14 고정소수점을 쓰고, 곱셈·나눗셈은 `int64`로 올립니다. blocked 스레드도 `all_elem`에서 함께 갱신해야 다시 깨어났을 때 우선순위가 맞습니다. → [`threads/thread.c`](pintos/threads/thread.c)
+- **프레임 교체** — accessed bit를 확인하는 clock 방식으로 최근 접근한 프레임에 한 번 더 기회를 줍니다. 공유 중인 Copy-on-Write 프레임은 역매핑이 없어 교체 후보에서 제외합니다. → [`vm/vm.c`](pintos/vm/vm.c)
+- **Copy-on-Write fork** — fork 직후에는 부모·자식이 읽기 전용 프레임을 공유하고, 쓰기 fault에서만 복사합니다. 원래 쓰기 권한과 현재 페이지 테이블 권한을 분리해 복구할 fault를 판단합니다. → [`vm/vm.c`](pintos/vm/vm.c)
 
 ## 검증
 
