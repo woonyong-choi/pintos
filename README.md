@@ -76,7 +76,7 @@ flowchart LR
 
 ## 관련 링크
 
-- [설계 노트](docs/design.md) — 왜 이 자료구조인지, 버린 대안, 알려진 한계
+- [설계 노트](docs/design.md) — 자료구조 선택과 알려진 한계
 - [단계별 구현 기록](docs/pintos/)
 - [담당 범위와 개인 확장 커밋](docs/contribution.md)
 - [부모 종료 후 자식 상태 회수 설계](docs/pintos/10-orphan-reaping.md)
