@@ -21,15 +21,6 @@ KAIST PintOS를 바탕으로 진행한 팀 학습 프로젝트입니다. 팀 구
 
 </details>
 
-## 목차
-
-- [문제와 제약](#문제와-제약)
-- [설계 결정](#설계-결정)
-- [구현](#구현)
-- [결과](#결과)
-- [실행](#실행)
-- [문서](#문서)
-
 ## 문제와 제약
 
 높은 우선순위 스레드를 먼저 실행하고, fork·exec·wait로 사용자 프로세스를 관리하며, 물리 메모리가 부족하면 페이지를 교체하는 커널을 구현합니다.
@@ -93,23 +84,35 @@ make -C pintos/vm check
 
 ## 문서
 
-- [설계 노트](docs/design.md). 자료구조 선택, 대안, 현재 제약.
-- [담당 범위와 개인 확장 커밋](docs/contribution.md). 팀 구현과 개인 후속 작업의 근거.
-- [PintOS Wiki](https://docs.woonyong.com/wiki/pintos/). 단계별 개념 정리.
+- 설계
+  - [설계 노트](docs/design.md)
+- 기여
+  - [담당 범위와 개인 확장 커밋](docs/contribution.md)
+- 개념
+  - [PintOS Wiki](https://docs.woonyong.com/wiki/pintos/)
 
 <details>
 <summary>팀 당시 학습·구현 기록</summary>
 
-아래 문서는 당시의 골격·계획·관측을 보존한 기록입니다. 현재 구현과 다른 부분은 각 문서의 시점 안내와 소스를 함께 확인하세요.
-
-| 주제 | 문서 |
-|---|---|
-| 커널 개요 | [전체 그림](docs/pintos/01-big-picture.md), [전체 개요](docs/pintos/02-overview.md) |
-| 자료구조·동기화 | [리스트](docs/pintos/03-data-structures.md), [동기화](docs/pintos/04-synchronization.md) |
-| 스레드 구현 | [Alarm Clock](docs/pintos/05-alarm-clock.md), [Priority Scheduling](docs/pintos/06-priority-scheduling.md), [MLFQS](docs/pintos/07-advanced-scheduler.md), [구현 가이드](docs/pintos/08-implementation-guide.md) |
-| 프로세스 구현 | [작업 계획](docs/pintos/w02-01-project2-work-plan.md), [검사 기록](docs/pintos/w02-02-project2-process-tests.md) |
-| 자식 상태 회수 | [초기 설계](docs/pintos/10-orphan-reaping.md), [설계 비교](docs/pintos/11-orphan-reaping-comparison.md) |
-| 환경·디버깅 | [학습 Q&A](docs/member/woonyong/README.md) |
+- 커널
+  - [전체 그림](docs/pintos/01-big-picture.md)
+  - [전체 개요](docs/pintos/02-overview.md)
+- 자료구조·동기화
+  - [리스트](docs/pintos/03-data-structures.md)
+  - [동기화](docs/pintos/04-synchronization.md)
+- 스레드
+  - [Alarm Clock](docs/pintos/05-alarm-clock.md)
+  - [Priority Scheduling](docs/pintos/06-priority-scheduling.md)
+  - [MLFQS](docs/pintos/07-advanced-scheduler.md)
+  - [구현 가이드](docs/pintos/08-implementation-guide.md)
+- 프로세스
+  - [작업 계획](docs/pintos/w02-01-project2-work-plan.md)
+  - [검사 기록](docs/pintos/w02-02-project2-process-tests.md)
+- 자식 상태 회수
+  - [초기 설계](docs/pintos/10-orphan-reaping.md)
+  - [설계 비교](docs/pintos/11-orphan-reaping-comparison.md)
+- 환경·디버깅
+  - [학습 Q&A](docs/member/woonyong/README.md)
 
 </details>
 
