@@ -84,35 +84,26 @@ make -C pintos/vm check
 
 ## 문서
 
-- 설계
-  - [설계 노트](docs/design.md)
-- 기여
-  - [담당 범위와 개인 확장 커밋](docs/contribution.md)
-- 개념
-  - [PintOS Wiki](https://docs.woonyong.com/wiki/pintos/)
+- [설계 노트](docs/design.md)
+- [담당 범위와 개인 확장 커밋](docs/contribution.md)
+- [PintOS Wiki](https://docs.woonyong.com/wiki/pintos/)
 
 <details>
 <summary>팀 당시 학습·구현 기록</summary>
 
-- 커널
-  - [전체 그림](docs/pintos/01-big-picture.md)
+- [커널](docs/pintos/01-big-picture.md)
   - [전체 개요](docs/pintos/02-overview.md)
-- 자료구조·동기화
-  - [리스트](docs/pintos/03-data-structures.md)
+- [자료구조·동기화](docs/pintos/03-data-structures.md)
   - [동기화](docs/pintos/04-synchronization.md)
-- 스레드
-  - [Alarm Clock](docs/pintos/05-alarm-clock.md)
+- [스레드](docs/pintos/05-alarm-clock.md)
   - [Priority Scheduling](docs/pintos/06-priority-scheduling.md)
   - [MLFQS](docs/pintos/07-advanced-scheduler.md)
   - [구현 가이드](docs/pintos/08-implementation-guide.md)
-- 프로세스
-  - [작업 계획](docs/pintos/w02-01-project2-work-plan.md)
+- [프로세스](docs/pintos/w02-01-project2-work-plan.md)
   - [검사 기록](docs/pintos/w02-02-project2-process-tests.md)
-- 자식 상태 회수
-  - [초기 설계](docs/pintos/10-orphan-reaping.md)
+- [자식 상태 회수](docs/pintos/10-orphan-reaping.md)
   - [설계 비교](docs/pintos/11-orphan-reaping-comparison.md)
-- 환경·디버깅
-  - [학습 Q&A](docs/member/woonyong/README.md)
+- [환경·디버깅](docs/member/woonyong/README.md)
 
 </details>
 
