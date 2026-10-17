@@ -1,5 +1,8 @@
 # Alarm Clock 구현 가이드
 
+> [!NOTE]
+> Alarm Clock 구현 전 골격과 구현 절차를 정리한 기록이다. 본문의 busy-wait 현재 설명은 당시 기준이며 현재 timer_sleep은 thread_sleep을 호출한다. [현재 구현과 결과](../../README.md), [설계 노트](../design.md).
+
 ## 문제 정의
 
 현재 `timer_sleep()` 은 **busy-wait** 방식으로 구현되어 있다.

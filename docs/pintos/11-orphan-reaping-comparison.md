@@ -1,5 +1,8 @@
 # Orphan Reaping 구현 비교
 
+> [!NOTE]
+> 루트 전체 sweep과 개별 회수의 설계 비교 기록이다. 현재 [process.c](../../pintos/userprog/process.c)는 살아 있는 자식 상태를 전역 orphan_status_list로 옮기고 종료한 자식이 self_status 한 건을 회수한다. 함수 인자는 curr 하나다. 루트가 소유한다는 과거 전제는 현재 코드와 구분한다.
+
 ## 목적
 
 이 문서는 Pintos Project 2에서 orphan 자식 처리 로직의 **이전 구현**과 **현재 구현**을 비교한다.
@@ -26,7 +29,7 @@
 
 - 부모가 죽으면 children을 순회한다.
 - 이미 `exited && !waited`인 자식 레코드는 그 자리에서 바로 정리한다.
-- 아직 살아 있는 자식만 루트로 넘긴다.
+- 아직 살아 있는 자식 레코드를 전역 orphan_status_list로 옮긴다.
 - orphaned 자식이 나중에 종료하면
   - 자기 `self_status`가 가리키는 레코드 한 건만
   - 직접 `list_remove + free` 한다.
@@ -57,7 +60,7 @@ flowchart TD
 flowchart TD
     A["부모 종료"] --> B{"자식 상태"}
     B -->|이미 exited && !waited| C["즉시 회수"]
-    B -->|아직 살아 있음| D["루트로 이동"]
+    B -->|아직 살아 있음| D["전역 orphan 목록으로 이동"]
     D --> E["orphaned 자식이 나중에 종료"]
     E --> F["self_status 한 건 직접 정리"]
 ```
@@ -66,7 +69,7 @@ flowchart TD
 
 | 항목 | 이전 구현 | 현재 구현 |
 |------|-----------|-----------|
-| 부모 종료 시 처리 | children 전부 루트로 이동 | 이미 죽은 건 즉시 회수, 살아 있는 것만 루트로 이동 |
+| 부모 종료 시 처리 | children 전부 루트로 이동 | 이미 죽은 건 즉시 회수, 살아 있는 것만 전역 orphan 목록으로 이동 |
 | orphan 종료 시 처리 | 루트 리스트 전체 순회 | `self_status` 한 건 직접 정리 |
 | 정리 단위 | 전체 리스트 기반 | 단일 레코드 기반 |
 | 시간 복잡도 감각 | orphan 종료마다 `O(n)` | orphan 종료 시 `O(1)`에 가까움 |
@@ -121,7 +124,7 @@ flowchart TD
 
 - `wait()` 호출이 아니라
 - 상태를 보고
-  - 살아 있으면 루트로 넘기고
+  - 살아 있으면 전역 `orphan_status_list`로 옮기고
   - 이미 죽었으면 즉시 정리하는 것이 맞다.
 
 ## 코드 구조 비교
@@ -142,7 +145,7 @@ flowchart TD
 
 ```text
 close_open_files(curr)
-reparent_or_reap_children(curr, root)
+reparent_or_reap_children(curr)
 finish_self_status(curr)
 ```
 

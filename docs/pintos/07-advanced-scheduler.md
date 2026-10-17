@@ -1,5 +1,8 @@
 # Advanced Scheduler (MLFQS) 구현 가이드
 
+> [!NOTE]
+> MLFQS 구현을 위한 학습·설계 예시다. 별도 fixed_point.h를 만드는 제안과 달리 현재 고정소수점 함수는 thread.c 안에 있다. [현재 구현과 결과](../../README.md), [설계 노트](../design.md).
+
 ## 개요
 
 4.4BSD 스케줄러를 기반으로 한 **다단계 피드백 큐 스케줄러(MLFQS)** 를 구현한다. 커널 부팅 시 `-mlfqs` 옵션으로 활성화되며, `thread_mlfqs` 전역 변수가 `true`로 설정된다.

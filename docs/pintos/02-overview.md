@@ -1,5 +1,8 @@
 # Pintos Project 1: Threads — 전체 개요
 
+> [!NOTE]
+> Project 1 구현 전 골격을 설명한 학습 기록이다. 본문의 현재·미구현 표현은 당시 기준이며, 현재 timer_sleep과 우선순위 큐는 구현되어 있다. [현재 구현과 결과](../../README.md), [설계 노트](../design.md).
+
 ## 프로젝트 목표
 
 Pintos의 최소 스레드 시스템을 확장하여 **동기화(synchronization)** 의 핵심 문제를 직접 체험하고 해결한다.
@@ -161,11 +164,13 @@ static void schedule(void) {
 
 | 파일 | 내용 |
 |------|------|
-| `01-big-picture.md` | 전체 흐름 Big Picture |
-| `02-overview.md` | 이 문서 — 전체 개요 |
-| `03-data-structures.md` | Pintos 자료구조 (list, list_entry, offsetof) |
-| `04-synchronization.md` | 동기화 프리미티브 상세 분석 |
-| `05-alarm-clock.md` | Alarm Clock 구현 가이드 |
-| `06-priority-scheduling.md` | Priority Scheduling + Priority Donation |
-| `07-advanced-scheduler.md` | MLFQS (4.4BSD 스케줄러) |
-| `08-implementation-guide.md` | 구현 순서 및 전략 가이드 |
+| [01-big-picture.md](01-big-picture.md) | 전체 흐름 Big Picture |
+| [02-overview.md](02-overview.md) | 이 문서 — 전체 개요 |
+| [03-data-structures.md](03-data-structures.md) | Pintos 자료구조 (list, list_entry, offsetof) |
+| [04-synchronization.md](04-synchronization.md) | 동기화 프리미티브 상세 분석 |
+| [05-alarm-clock.md](05-alarm-clock.md) | Alarm Clock 구현 가이드 |
+| [06-priority-scheduling.md](06-priority-scheduling.md) | Priority Scheduling + Priority Donation |
+| [07-advanced-scheduler.md](07-advanced-scheduler.md) | MLFQS (4.4BSD 스케줄러) |
+| [08-implementation-guide.md](08-implementation-guide.md) | 구현 순서 및 전략 가이드 |
+
+추가 기록은 [프로세스 작업 계획](w02-01-project2-work-plan.md), [프로세스 검사 기록](w02-02-project2-process-tests.md), [상태 회수 설계](10-orphan-reaping.md), [설계 비교](11-orphan-reaping-comparison.md), [개인 학습 Q&A](../member/woonyong/README.md)에 있다.

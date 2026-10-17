@@ -1,5 +1,8 @@
 # Pintos 자료구조 핵심 정리
 
+> [!NOTE]
+> Project 1 학습용 개념과 코드 예시를 보존한 기록이다. 현재 구현의 자료구조와 선택 근거는 설계 노트에서 확인한다. [현재 구현과 결과](../../README.md), [설계 노트](../design.md).
+
 ## Pintos Doubly-Linked List
 
 Pintos에서 가장 많이 사용하는 자료구조다. `ready_list`, `sleep_list`, `waiters` 등 거의 모든 곳에서 활용된다. 반드시 완벽히 이해해야 한다.

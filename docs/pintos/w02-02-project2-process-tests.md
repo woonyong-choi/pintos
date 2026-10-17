@@ -1,5 +1,8 @@
 # PintOS Project 2 — 포크/프로세스 관련 테스트 분류
 
+> [!NOTE]
+> Project 2 당시 프로세스 검사 분류·관측 기록이다. 여기서 다룬 66개는 현재 userprog 전체 CI 96개와 범위가 다르다. [현재 구현과 결과](../../README.md), [설계 노트](../design.md).
+
 > 전체 66개 테스트 중 포크·exec·wait·프로세스 라이프사이클과 관련된 항목만 추출.
 > 파일 시스콜 전용 테스트(Create, Open, Close, Read, Write)는 제외.
 

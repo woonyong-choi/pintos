@@ -1,5 +1,8 @@
 # Q01. Pintos 개발 환경 실행 및 GDB 디버깅 -- Docker, QEMU, GDB 원격 디버깅
 
+> [!NOTE]
+> 팀 초기 CLion 환경과 구현 전 관측을 보존한 학습 기록이다. IDE 절대 경로·busy-wait·틱 출력은 당시 기준이다. 현재 실행은 [README](../../../README.md#실행)를 따른다.
+
 > Pintos 개발 환경 | 기본
 
 ## 질문
@@ -49,7 +52,7 @@ PATH=$DIR/utils:$PATH
 
 `.bashrc`에 등록된 activate 경로가 특정 워크스페이스 절대 경로로 고정되어 있으면
 다른 IDE나 다른 로컬 경로에서는 실패한다.
-현재 저장소 기준으로는 Dev Container의 `remoteEnv`와 `postCreateCommand`가 워크스페이스 경로를 사용해 `pintos/utils`를 PATH에 추가한다.
+현재 Dockerfile은 `.bashrc`에서 `/workspaces/*/pintos/activate`를 찾아 읽는다. 다른 마운트 경로에서는 저장소 루트에서 `source pintos/activate`를 직접 실행한다.
 
 > Pintos는 왜 일반 프로그램처럼 Run 버튼으로 실행할 수 없는가
 
@@ -75,14 +78,14 @@ Thread: 0 idle ticks, 581 kernel ticks, 0 user ticks
 ```
 
 idle ticks = 0이 핵심이다. CPU가 한 번도 쉬지 못했다는 뜻이다.
-현재는 busy-wait 방식이므로 sleep 중에도 CPU를 계속 소비한다.
+이 관측은 busy-wait를 제거하기 전의 기록이다. 현재 timer_sleep은 thread_sleep을 호출한다.
 Alarm Clock을 구현하면 idle ticks가 크게 증가해야 한다.
 
 TIMER_FREQ = 100이므로:
 - 1틱 = 1/100초 = 10ms
 - 580틱 = 5.8초
 - alarm-multiple에서 thread 4가 50틱씩 7번 = 350틱 = 3.5초가 최대 sleep 시간
-- 580 - 350 = 230틱은 다른 스레드 스케줄링 + 부팅 오버헤드
+- 580 - 350 = 230틱에는 테스트 자체 대기와 부팅·스케줄링이 함께 포함되어 원인별 비용으로 분리할 수 없다.
 
 > GDB 디버깅은 왜 터미널 2개가 필요하고, 어떤 순서로 진행하는가
 
@@ -112,6 +115,6 @@ GDB는 커널 PANIC, 무한 루프, 메모리 훼손 등 printf로 잡기 어려
 
 ## 연결 키워드
 
-- 10-dev-workflow.md -- 개발 환경 전체 가이드
-- 05-alarm-clock.md -- timer_sleep 구현 (busy-wait 제거)
-- 01-big-picture.md -- timer_interrupt 흐름
+- [실행 안내](../../../README.md#실행)
+- [Alarm Clock](../../pintos/05-alarm-clock.md)
+- [전체 그림](../../pintos/01-big-picture.md)
