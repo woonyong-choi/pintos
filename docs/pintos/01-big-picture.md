@@ -1,5 +1,8 @@
 # Project 1 전체 그림: 무엇을 만드는가
 
+> [!NOTE]
+> Project 1 구현 전 개념·예시를 정리한 학습 기록이다. 아래 코드와 별도 fixed_point.h 구성은 당시 설명용이며 현재 구현은 thread.c의 고정소수점 보조 함수를 사용한다. [현재 구현과 결과](../../README.md), [설계 노트](../design.md).
+
 ## 한 줄 요약
 
 타이머로 스레드를 재우고, 우선순위로 스레드를 고르고, 락으로 우선순위를 넘기고, 수식으로 우선순위를 자동 계산하는 스케줄러를 만든다.
@@ -7,8 +10,6 @@
 ---
 
 ## 전체 구조도
-
-![전체 아키텍처](img/01-architecture.svg)
 
 ```
 +================================================================+
@@ -56,8 +57,6 @@
 
 ## Phase별 의존 관계
 
-![Phase 의존 체인](img/02-phase-dependency.svg)
-
 ```
 Phase 1: Alarm Clock
     |
@@ -92,8 +91,6 @@ Phase 1을 잘못 짜면 Phase 2-4 전부 흔들린다.
 ---
 
 ## 스레드 상태 전이와 각 Phase의 개입 지점
-
-![스레드 생명주기](img/03-thread-lifecycle.svg)
 
 ```
                          thread_create()
@@ -137,8 +134,6 @@ Phase 1을 잘못 짜면 Phase 2-4 전부 흔들린다.
 ---
 
 ## timer_interrupt: 모든 것의 시작점
-
-![timer_interrupt 흐름](img/04-timer-interrupt.svg)
 
 하드웨어 타이머가 초당 100번 인터럽트를 발생시킨다.
 이 하나의 함수가 Phase 1과 Phase 4의 진입점이다.
@@ -204,8 +199,6 @@ schedule() 내부:
 ---
 
 ## lock과 priority donation: Phase 3의 핵심 흐름
-
-![Priority Donation 시나리오](img/05-priority-donation.svg)
 
 ```
 상황: H(63)가 L(1)이 보유한 Lock A를 요청
@@ -323,8 +316,6 @@ thread_create()의 priority 인자 --> 무시
 ---
 
 ## 수정하는 파일과 Phase의 관계
-
-![struct thread 확장](img/06-struct-thread.svg)
 
 ```
 include/threads/thread.h

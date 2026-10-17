@@ -1,5 +1,8 @@
 # Priority Scheduling 구현 가이드
 
+> [!NOTE]
+> Priority Scheduling 구현 전 골격과 구현 예시를 정리한 기록이다. 현재 ready 큐는 정렬 삽입하며, ready 상태 holder의 기부 재배치도 처리한다. [현재 구현과 결과](../../README.md), [설계 노트](../design.md).
+
 ## 개요
 
 현재 Pintos 스케줄러는 **라운드로빈(FIFO)** 방식이다. 이를 **선점형 우선순위 스케줄링**으로 변경해야 한다.

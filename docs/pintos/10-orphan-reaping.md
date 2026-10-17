@@ -1,5 +1,8 @@
 # Orphan Reparenting과 Reaping 판단 정리
 
+> [!NOTE]
+> 팀 당시 루트 reparenting과 전체 sweep을 검토한 과거 설계다. 본문의 현재 구현은 당시 기준이다. 현재 코드는 전역 orphan_status_list와 self_status 한 건 회수를 사용하며 설계 비교 문서에서 차이를 확인한다. [현재 구현과 결과](../../README.md), [설계 노트](../design.md).
+
 ## 핵심 질문
 
 Pintos에서 부모가 먼저 종료했을 때 남은 자식 상태를 어떻게 다룰 것인가?
