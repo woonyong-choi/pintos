@@ -9,7 +9,7 @@
 | 원본 | [Jungle-12-303/wk11_7](https://github.com/Jungle-12-303/wk11_7) |
 | 기간 | 2026-04-23부터 2026-05-21까지. 현재 이력의 첫 커밋 `581a1e4`부터 팀 종료 `7aa964b`까지 |
 | 전체 이력 | `git rev-list --count 7aa964b` 기준 조상 커밋 198개. 병합 커밋 포함 |
-| 사용자 저자 이력 | `git rev-list --count --author='woonyong.kr@gmail.com' 7aa964b` 기준 145개 |
+| 본인 명의 커밋 수 | `git rev-list --count --author='woonyong.kr@gmail.com' 7aa964b` 기준 145개 |
 | 참여 범위 | alarm·priority donation, userprog·vm 전반의 구현·통합 |
 | 다른 팀원과 공동 작업 | 파일 시스템 콜, 프레임 테이블, 교체, mmap, COW |
 
